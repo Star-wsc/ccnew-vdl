@@ -42,14 +42,19 @@ type LogEntry struct {
 }
 
 type CollectionVideoInfo struct {
-	BVID     string `json:"bvid,omitempty"`
-	VideoID  string `json:"video_id"`
-	URL      string `json:"url"`
-	Title    string `json:"title"`
-	Author   string `json:"author"`
-	CoverURL string `json:"cover_url"`
-	Duration int    `json:"duration"`
-	Page     int    `json:"page"`
+	BVID         string `json:"bvid,omitempty"`
+	VideoID      string `json:"video_id"`
+	URL          string `json:"url"`
+	Title        string `json:"title"`
+	Author       string `json:"author"`
+	CoverURL     string `json:"cover_url"`
+	Duration     int    `json:"duration"`
+	Page         int    `json:"page"`
+	Status       string `json:"status"`        // pending/downloading/completed/failed
+	Progress     int    `json:"progress"`       // 0-100
+	FilePath     string `json:"file_path"`
+	FileSize     int64  `json:"file_size"`
+	ErrorMessage string `json:"error_message"`
 }
 
 type CollectionInfo struct {
@@ -103,6 +108,9 @@ func NewHandlers(cfg *config.Config, mgr *download.Manager) *Handlers {
 }
 
 func (h *Handlers) addLog(level, taskID, message string) {
+	// 同时输出到控制台
+	log.Printf("[%s] %s: %s", level, taskID, message)
+
 	h.logsMu.Lock()
 	defer h.logsMu.Unlock()
 	h.logs = append(h.logs, LogEntry{
@@ -839,13 +847,21 @@ func (h *Handlers) CreateCollection(c *gin.Context) {
 			CoverURL: cover,
 			Duration: duration,
 			Page:     i + 1,
+			Status:   "pending",
 		})
+	}
+
+	// 从视频列表中获取作者信息
+	author := ""
+	if len(videos) > 0 && videos[0].Author != "" {
+		author = videos[0].Author
 	}
 
 	col := &CollectionInfo{
 		ID:         colID,
 		URL:        req.URL,
 		Title:      req.Title,
+		Author:     author,
 		TotalCount: len(videos),
 		Videos:     videos,
 		Status:     "pending",
@@ -857,8 +873,15 @@ func (h *Handlers) CreateCollection(c *gin.Context) {
 	h.collections[colID] = col
 	h.collectionsMu.Unlock()
 
+	log.Printf("[INFO] %s: 合集已创建: %s, AutoDownload=%v, Quality=%s, 视频数=%d", colID, col.Title, req.AutoDownload, req.Quality, len(col.Videos))
+	h.addLog("INFO", colID, fmt.Sprintf("合集已创建: %s, AutoDownload=%v, Quality=%s", col.Title, req.AutoDownload, req.Quality))
+
 	if req.AutoDownload {
+		log.Printf("[INFO] %s: 启动合集下载...", colID)
+		h.addLog("INFO", colID, "启动合集下载...")
 		go h.downloadCollectionVideos(colID, req.Quality)
+	} else {
+		log.Printf("[INFO] %s: AutoDownload=false, 不启动下载", colID)
 	}
 
 	c.JSON(http.StatusOK, col)
@@ -953,16 +976,30 @@ func (h *Handlers) DownloadCollection(c *gin.Context) {
 }
 
 func (h *Handlers) downloadCollectionVideos(colID, quality string) {
+	log.Printf("[INFO] %s: downloadCollectionVideos 开始执行", colID)
 	h.collectionsMu.RLock()
 	col, exists := h.collections[colID]
 	h.collectionsMu.RUnlock()
 	if !exists {
+		log.Printf("[ERROR] %s: 合集不存在", colID)
+		h.addLog("ERROR", colID, "合集不存在")
 		return
 	}
 
+	log.Printf("[INFO] %s: 开始下载合集: %s, 视频数: %d", colID, col.Title, len(col.Videos))
+	h.addLog("INFO", colID, fmt.Sprintf("开始下载合集: %s, 视频数: %d", col.Title, len(col.Videos)))
 	col.Status = "downloading"
-	taskCount := 0
-	for _, v := range col.Videos {
+
+	// 使用信号量限制并发数为5
+	sem := make(chan struct{}, 5)
+	var wg sync.WaitGroup
+
+	for i, v := range col.Videos {
+		// 跳过已完成的
+		if v.Status == "completed" {
+			continue
+		}
+
 		videoURL := v.URL
 		if videoURL == "" && v.VideoID != "" {
 			videoURL = fmt.Sprintf("https://www.douyin.com/video/%s", v.VideoID)
@@ -971,26 +1008,155 @@ func (h *Handlers) downloadCollectionVideos(colID, quality string) {
 			videoURL = fmt.Sprintf("https://www.bilibili.com/video/%s", v.BVID)
 		}
 		if videoURL == "" {
+			h.addLog("WARNING", colID, fmt.Sprintf("视频 %d 无有效URL，跳过", i+1))
+			v.Status = "failed"
+			v.ErrorMessage = "无有效URL"
 			continue
 		}
 
-		// 检查是否已有相同URL的任务
-		existing := h.mgr.FindTaskByURL(videoURL)
-		if existing != nil {
-			if existing.Status == StatusFailed {
-				existing.Status = StatusPending
-				existing.ErrorMessage = ""
-				go h.mgr.ExecuteTask(context.Background(), existing.ID)
+		wg.Add(1)
+		go func(idx int, video *CollectionVideoInfo, url string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			// 更新状态为下载中
+			h.collectionsMu.Lock()
+			video.Status = "downloading"
+			video.Progress = 0
+			h.collectionsMu.Unlock()
+
+			h.addLog("INFO", colID, fmt.Sprintf("[%d/%d] 开始下载: %s", idx+1, len(col.Videos), video.Title))
+
+			// 解析视频获取下载信息
+			videoInfo, err := h.mgr.ParseVideo(url, quality)
+			if err != nil {
+				h.collectionsMu.Lock()
+				video.Status = "failed"
+				video.ErrorMessage = err.Error()
+				h.collectionsMu.Unlock()
+				h.addLog("ERROR", colID, fmt.Sprintf("解析失败: %s - %v", video.Title, err))
+				return
 			}
-			continue
-		}
 
-		task := h.mgr.CreateTask(videoURL, quality)
-		go h.mgr.ExecuteTask(context.Background(), task.ID)
-		taskCount++
+			// 更新视频信息
+			h.collectionsMu.Lock()
+			if videoInfo["title"] != nil {
+				video.Title = videoInfo["title"].(string)
+			}
+			if videoInfo["author"] != nil {
+				video.Author = videoInfo["author"].(string)
+			}
+			if videoInfo["cover_url"] != nil {
+				video.CoverURL = videoInfo["cover_url"].(string)
+			}
+			h.collectionsMu.Unlock()
+
+			// 生成输出路径
+			safeTitle := sanitizeFilename(video.Title)
+			if safeTitle == "" {
+				safeTitle = fmt.Sprintf("video_%d", idx+1)
+			}
+			prefix := "bz_"
+			if strings.Contains(url, "douyin") {
+				prefix = "dy_"
+			}
+			outputPath := filepath.Join(h.cfg.DownloadDir, prefix+safeTitle+".mp4")
+
+			// 调用下载（复用Manager的下载逻辑）
+			// 这里我们需要直接调用bilibili或douyin的下载器
+			platform := identifyPlatform(url)
+			var downloadErr error
+
+			switch platform {
+			case "bilibili":
+				// 获取真实的下载URL
+				parser := bilibili.NewParser()
+				if h.cfg.BilibiliCookie != "" {
+					parser.SetCookies(h.cfg.BilibiliCookie)
+				}
+				biliInfo, err := parser.Parse(url, quality)
+				if err != nil {
+					downloadErr = err
+					break
+				}
+				downloader := bilibili.NewDownloader()
+				if h.cfg.BilibiliCookie != "" {
+					downloader.SetCookies(h.cfg.BilibiliCookie)
+				}
+				if biliInfo.AudioURL != "" {
+					downloadErr = downloader.DownloadWithMerge(biliInfo.VideoURL, biliInfo.AudioURL, outputPath, func(downloaded, total int64) {
+						h.collectionsMu.Lock()
+						if total > 0 {
+							video.Progress = int(downloaded * 100 / total)
+						}
+						h.collectionsMu.Unlock()
+					})
+				} else {
+					downloadErr = downloader.Download(biliInfo.VideoURL, outputPath, func(downloaded, total int64) {
+						h.collectionsMu.Lock()
+						if total > 0 {
+							video.Progress = int(downloaded * 100 / total)
+						}
+						h.collectionsMu.Unlock()
+					})
+				}
+			case "douyin":
+				douyinDl := douyin.NewDouyinDownloader(h.cfg.Proxy)
+				if h.cfg.DouyinCookie != "" {
+					douyinDl.SetCookies(h.cfg.DouyinCookie)
+				}
+				douyinInfo, err := douyinDl.Parse(url)
+				if err != nil {
+					downloadErr = err
+					break
+				}
+				cookies := make(map[string]string)
+				downloadErr = douyinDl.DownloadVideo(douyinInfo.VideoURL, outputPath, cookies, func(downloaded, total int64) {
+					h.collectionsMu.Lock()
+					if total > 0 {
+						video.Progress = int(downloaded * 100 / total)
+					}
+					h.collectionsMu.Unlock()
+				})
+			default:
+				downloadErr = fmt.Errorf("不支持的平台")
+			}
+
+			// 更新最终状态
+			h.collectionsMu.Lock()
+			if downloadErr != nil {
+				video.Status = "failed"
+				video.ErrorMessage = downloadErr.Error()
+				h.addLog("ERROR", colID, fmt.Sprintf("下载失败: %s - %v", video.Title, downloadErr))
+			} else {
+				video.Status = "completed"
+				video.Progress = 100
+				video.FilePath = outputPath
+				if info, err := os.Stat(outputPath); err == nil {
+					video.FileSize = info.Size()
+				}
+				h.addLog("INFO", colID, fmt.Sprintf("下载完成: %s", video.Title))
+			}
+			h.collectionsMu.Unlock()
+		}(i, v, videoURL)
 	}
 
-	h.addLog("INFO", colID, fmt.Sprintf("合集下载已启动: %d个视频", taskCount))
+	// 等待所有下载完成
+	go func() {
+		wg.Wait()
+		h.collectionsMu.Lock()
+		col.Status = "completed"
+		// 检查是否有失败的
+		for _, v := range col.Videos {
+			if v.Status == "failed" {
+				col.Status = "partial" // 部分失败
+				break
+			}
+		}
+		h.collectionsMu.Unlock()
+		h.addLog("INFO", colID, fmt.Sprintf("合集下载完成: %s, 状态: %s", col.Title, col.Status))
+	}()
 }
 
 // ==================== Settings (from old frontend) ====================
@@ -1017,6 +1183,29 @@ func (h *Handlers) SaveSettings(c *gin.Context) {
 }
 
 // ==================== Helpers ====================
+
+func sanitizeFilename(name string) string {
+	replacer := strings.NewReplacer(
+		"/", "_", "\\", "_", ":", "_", "*", "_", "?", "_",
+		"\"", "_", "<", "_", ">", "_", "|", "_", "\n", "_", "\r", "_",
+	)
+	name = replacer.Replace(name)
+	runes := []rune(name)
+	if len(runes) > 100 {
+		name = string(runes[:100])
+	}
+	return strings.TrimSpace(name)
+}
+
+func identifyPlatform(url string) string {
+	if strings.Contains(url, "bilibili.com") || strings.Contains(url, "b23.tv") {
+		return "bilibili"
+	}
+	if strings.Contains(url, "douyin.com") || strings.Contains(url, "iesdouyin.com") || strings.Contains(url, "v.douyin.com") {
+		return "douyin"
+	}
+	return ""
+}
 
 func extractFirstURL(text string) string {
 	re := regexp.MustCompile(`https?://[^\s<>"']+`)

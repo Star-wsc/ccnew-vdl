@@ -1579,6 +1579,7 @@
         
         .status-pending { background: #fef3c7; color: #92400e; }
         .status-parsing { background: #dbeafe; color: #1e40af; }
+        .status-pending { background: #fef3c7; color: #92400e; }
         .status-downloading { background: #d1fae5; color: #065f46; }
         .status-completed { background: var(--success); color: white; }
         .status-failed { background: #fee2e2; color: #991b1b; }
@@ -3619,6 +3620,7 @@
         
         function clearPreview() {
             selectedTaskId = null;
+            selectedCollectionId = null;
             previewData = null;
             const container = document.getElementById('previewContainer');
             if (container) {
@@ -3631,6 +3633,7 @@
                 `;
             }
             renderTasks();
+            loadHistory(); // 清空历史显示
         }
         
         async function updateStats() {
@@ -3724,9 +3727,10 @@
             const map = {
                 'pending': '等待',
                 'parsing': '解析',
-                'downloading': '下载',
+                'downloading': '下载中',
                 'completed': '完成',
-                'failed': '失败'
+                'failed': '失败',
+                'partial': '部分完成'
             };
             return map[status] || status;
         }
@@ -3737,7 +3741,8 @@
             currentTaskMode = 'single';
             renderTasks();
             renderPreview();
-            
+            loadHistory(); // 加载单视频下载历史
+
             const isMobile = window.innerWidth <= 768;
             if (isMobile) {
                 switchMobilePanel('content-area');
@@ -3936,7 +3941,7 @@
                         if (previewResp.ok) {
                             const collectionData = await previewResp.json();
 
-                            // 创建合集记录（不自动下载）
+                            // 创建合集记录
                             const createResp = await fetch('/api/collections', {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
@@ -3945,7 +3950,7 @@
                                     title: collectionData.title,
                                     videos: collectionData.videos,
                                     quality: qualitySelect.value,
-                                    auto_download: false  // 不自动下载
+                                    auto_download: true
                                 })
                             });
 
@@ -4019,7 +4024,7 @@
                                         title: data.title,
                                         videos: data.videos,
                                         quality: qualitySelect.value,
-                                        auto_download: false
+                                        auto_download: true
                                     })
                                 });
                                 if (createResp.ok) {
@@ -4078,9 +4083,10 @@
             if (!confirm('确定要删除这个任务吗？')) return;
 
             try {
-                await fetch(`/api/tasks/${taskId}`, { method: 'DELETE' });      
+                await fetch(`/api/tasks/${taskId}`, { method: 'DELETE' });
                 if (selectedTaskId === taskId) {
                     selectedTaskId = null;
+                    clearPreview();
                 }
                 // 重置筛选器，确保显示所有任务
                 currentFilter = '';
@@ -4089,11 +4095,7 @@
                     tab.classList.toggle('active', tab.dataset.status === '');
                 });
                 await loadTasks();
-                renderPreview();
-                // 如果当前在下载历史标签页，刷新历史记录
-                if (currentTab === 'history') {
-                    await loadHistory();
-                }
+                loadHistory();
                 showToast('任务已删除');
             } catch (e) {
                 showToast('删除失败');
@@ -4202,7 +4204,12 @@
             document.querySelectorAll('.filter-tab').forEach(tab => {
                 tab.classList.toggle('active', tab.dataset.status === status);
             });
-            loadTasks();
+            // 根据当前模式加载对应列表
+            if (currentTaskMode === 'single') {
+                loadTasks();
+            } else {
+                renderCollections();
+            }
         }
         
         function switchTab(tab) {
@@ -4210,6 +4217,50 @@
         }
         
         async function loadHistory() {
+            const container = document.getElementById('historyList');
+            if (!container) return;
+
+            console.log('loadHistory called, selectedTaskId:', selectedTaskId, 'selectedCollectionId:', selectedCollectionId);
+
+            // 如果没有选中任何内容，显示空状态
+            if (!selectedTaskId && !selectedCollectionId) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-icon">📁</div>
+                        <div class="empty-title">未选择内容</div>
+                        <div class="empty-desc">选择任务或合集查看下载历史</div>
+                    </div>
+                `;
+                return;
+            }
+
+            // 如果选中了合集，显示合集的视频下载历史
+            if (selectedCollectionId) {
+                console.log('Loading collection history for:', selectedCollectionId);
+                try {
+                    const response = await fetch('/api/collections/' + selectedCollectionId);
+                    console.log('Collection response:', response.status);
+                    if (response.ok) {
+                        const collection = await response.json();
+                        console.log('Collection data:', collection);
+                        renderCollectionHistory(collection);
+                    } else {
+                        // 合集可能已被删除
+                        selectedCollectionId = null;
+                        container.innerHTML = `
+                            <div class="empty-state">
+                                <div class="empty-icon">📁</div>
+                                <div class="empty-title">合集不存在</div>
+                            </div>
+                        `;
+                    }
+                } catch (e) {
+                    console.error('Load collection history error:', e);
+                }
+                return;
+            }
+
+            // 如果选中了单视频任务，显示单视频下载历史
             try {
                 const response = await fetch('/api/tasks?status=completed');
                 const historyTasks = await response.json();
@@ -4218,7 +4269,69 @@
                 console.error('Load history error:', e);
             }
         }
-        
+
+        function renderCollectionHistory(collection) {
+            console.log('renderCollectionHistory called', collection);
+            const container = document.getElementById('historyList');
+            if (!container) return;
+
+            if (!collection.videos || collection.videos.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-icon">📁</div>
+                        <div class="empty-title">合集暂无视频</div>
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = collection.videos.map((v, idx) => {
+                const statusClass = v.status || 'pending';
+                const statusText = {
+                    'pending': '等待中',
+                    'downloading': '下载中',
+                    'completed': '已完成',
+                    'failed': '失败'
+                }[statusClass] || '等待中';
+
+                const cover = v.cover_url || '';
+                const coverHtml = cover ?
+                    `<img src="${getProxyImageUrl(cover, 'bilibili')}" alt="封面" onerror="this.parentElement.innerHTML='<div class=\\'no-cover\\'>🎬</div>'">` :
+                    '<div class="no-cover">🎬</div>';
+
+                const progressBar = v.status === 'downloading' ?
+                    `<div class="task-progress" style="margin-top:4px;height:4px;">
+                        <div class="task-progress-bar" style="width:${v.progress || 0}%"></div>
+                    </div>` : '';
+
+                const statusIcon = {
+                    'pending': '⏳',
+                    'downloading': '⬇️',
+                    'completed': '✅',
+                    'failed': '❌'
+                }[statusClass] || '⏳';
+
+                return `
+                <div class="history-item-compact" style="flex-direction:column;">
+                    <div style="display:flex;align-items:center;gap:8px;width:100%;">
+                        <div class="history-cover-compact" style="flex-shrink:0;">
+                            ${coverHtml}
+                        </div>
+                        <div class="history-info-compact" style="flex:1;min-width:0;">
+                            <div class="history-title-compact">${statusIcon} ${v.title || '未知标题'}</div>
+                            <div class="history-meta-compact">
+                                ${v.author || '未知'} · <span class="status-${statusClass}">${statusText}</span>
+                                ${v.status === 'completed' ? ` · ${formatSize(v.file_size || 0)}` : ''}
+                                ${v.status === 'failed' ? ` · ${v.error_message || '未知错误'}` : ''}
+                            </div>
+                        </div>
+                    </div>
+                    ${progressBar}
+                </div>
+            `;
+            }).join('');
+        }
+
         function renderHistory(historyTasks) {
             const container = document.getElementById('historyList');
             if (!container) return;
@@ -4308,8 +4421,14 @@
         
         function renderCollections() {
             const container = document.getElementById('collectionList');
-            
-            if (collections.length === 0) {
+
+            // 根据当前过滤器筛选合集
+            let filteredCollections = collections;
+            if (currentFilter) {
+                filteredCollections = collections.filter(col => col.status === currentFilter);
+            }
+
+            if (filteredCollections.length === 0) {
                 container.innerHTML = `
                     <div class="empty-state">
                         <div class="empty-icon">📁</div>
@@ -4319,33 +4438,45 @@
                 `;
                 return;
             }
-            
-            container.innerHTML = collections.map(col => `
-                <div class="task-item" onclick="selectCollection('${col.id}')">
+
+            // 计算合集进度
+            container.innerHTML = filteredCollections.map(col => {
+                const totalVideos = col.videos ? col.videos.length : 0;
+                const completedVideos = col.videos ? col.videos.filter(v => v.status === 'completed').length : 0;
+                const progress = totalVideos > 0 ? Math.round(completedVideos * 100 / totalVideos) : 0;
+
+                return `
+                <div class="task-item ${selectedCollectionId === col.id ? 'active' : ''}" onclick="selectCollection('${col.id}')">
                     <div class="task-header">
                         <span class="task-id"><span class="platform-badge ${getPlatformClass(col.url)}">${getPlatformName(col.url)}</span>#${col.id}</span>
                         <span class="task-status status-${col.status}">${getStatusText(col.status)}</span>
                     </div>
                     <div class="task-title">${col.title || '未知合集'}</div>
-                    <div class="task-author">${col.author || '未知作者'} · ${col.total_count || 0} 个视频</div>
+                    <div class="task-author">${col.author || '未知作者'} · ${completedVideos}/${totalVideos} 个视频</div>
                     <button class="task-btn delete" onclick="event.stopPropagation(); deleteCollection('${col.id}')" style="position: absolute; bottom: 8px; right: 8px;">删除</button>
                     ${col.status === 'downloading' ? `
                         <div class="task-progress">
-                            <div class="task-progress-bar" style="width: 50%"></div>
+                            <div class="task-progress-bar" style="width: ${progress}%"></div>
                         </div>
                     ` : ''}
                 </div>
-            `).join('');
+            `}).join('');
         }
         
         async function deleteCollection(id) {
             if (!confirm('确定要删除这个合集任务吗？')) return;
-            
+
             try {
                 const response = await fetch('/api/collections/' + id, { method: 'DELETE' });
                 if (response.ok) {
                     addOperationLog('删除合集任务成功', 'success');
+                    // 如果删除的是当前选中的合集，清除选中状态和预览
+                    if (selectedCollectionId === id) {
+                        selectedCollectionId = null;
+                        clearPreview();
+                    }
                     loadCollections();
+                    loadHistory();
                 }
             } catch (e) {
                 showToast('删除失败');
@@ -4357,7 +4488,7 @@
             selectedTaskId = null;
             currentTaskMode = 'collection';
             loadCollectionVideos(id);
-            loadCollectionHistory(id);
+            loadHistory(); // 加载合集下载历史
         }
         
         async function loadCollectionVideos(id) {
@@ -5019,7 +5150,16 @@
                 return;
             }
             
-            if (url.includes('space.bilibili.com') && url.includes('/lists/')) {
+            // 检测B站合集URL（支持多种格式）
+            const isBilibiliCollection = url.includes('space.bilibili.com') && url.includes('/lists/') ||
+                url.includes('bilibili.com/bangumi/play/ss') ||
+                url.includes('bilibili.com/bangumi/media/md') ||
+                url.includes('bilibili.com/medialist/play/ml') ||
+                url.includes('space.bilibili.com') && url.includes('/channel/collectiondetail') ||
+                url.includes('space.bilibili.com') && url.includes('/channel/seriesdetail') ||
+                url.includes('bilibili.com/list/');
+
+            if (isBilibiliCollection) {
                 container.innerHTML = '<div class="empty-state"><div class="loading-spinner" style="width:32px;height:32px;border-width:3px;"></div><div class="empty-title">正在解析合集...</div></div>';
                 
                 try {

@@ -47,10 +47,10 @@ public class WindowCreator {
     public static Window Create(string url, string title) {
         var win = new Window();
         win.Title = title;
-        win.Width = 1200;
-        win.Height = 800;
-        win.MinWidth = 900;
-        win.MinHeight = 600;
+        win.Width = 1600;
+        win.Height = 1067;
+        win.MinWidth = 1200;
+        win.MinHeight = 800;
         win.WindowStartupLocation = WindowStartupLocation.CenterScreen;
         win.Background = new SolidColorBrush(Color.FromRgb(26, 26, 46));
 
