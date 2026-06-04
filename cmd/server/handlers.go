@@ -720,6 +720,8 @@ func (h *Handlers) PreviewCollection(c *gin.Context) {
 		return
 	}
 
+	log.Printf("[DEBUG] PreviewCollection 被调用: %s", req.URL)
+
 	// 根据URL判断平台
 	isDouyin := strings.Contains(req.URL, "douyin.com") || strings.Contains(req.URL, "iesdouyin.com") || strings.Contains(req.URL, "v.douyin.com")
 	isBilibili := strings.Contains(req.URL, "bilibili.com") || strings.Contains(req.URL, "b23.tv")

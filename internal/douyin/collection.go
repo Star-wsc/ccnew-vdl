@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"regexp"
 	"strings"
@@ -148,30 +149,73 @@ func extractCollectionID(urlStr string) (string, string, error) {
 }
 
 func (p *CollectionParser) fetchPlayletByAPI(mixID string) (*CollectionInfo, error) {
-	apiURL := fmt.Sprintf("https://www.douyin.com/aweme/v1/web/mix/item/list/?mix_id=%s&cursor=0&count=20&aid=6383", mixID)
-
-	req, err := http.NewRequest("GET", apiURL, nil)
-	if err != nil {
-		return nil, err
-	}
-	p.setHeaders(req)
-
-	resp, err := p.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
+	// 尝试多种API端点
+	apiEndpoints := []string{
+		fmt.Sprintf("https://www.iesdouyin.com/web/api/v2/aweme/iteminfo/?item_ids=%s", mixID),
+		fmt.Sprintf("https://www.douyin.com/aweme/v1/web/mix/item/list/?mix_id=%s&cursor=0&count=20&aid=6383", mixID),
+		fmt.Sprintf("https://www.douyin.com/aweme/v1/web/aweme/listcollection/?collection_id=%s&cursor=0&count=20&aid=6383", mixID),
 	}
 
-	if len(body) == 0 || body[0] == '<' {
-		return nil, fmt.Errorf("API返回非JSON")
+	var lastErr error
+	for _, apiURL := range apiEndpoints {
+		log.Printf("[抖音合集] 尝试API: %s", apiURL)
+
+		req, err := http.NewRequest("GET", apiURL, nil)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		// 使用移动端UA
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Linux; Android 13; SM-G991B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36")
+		req.Header.Set("Referer", "https://www.douyin.com/")
+		req.Header.Set("Accept", "application/json, text/plain, */*")
+		req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9")
+		if p.cookies != "" {
+			req.Header.Set("Cookie", p.cookies)
+		}
+
+		resp, err := p.client.Do(req)
+		if err != nil {
+			log.Printf("[抖音合集] API请求失败: %v", err)
+			lastErr = err
+			continue
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		log.Printf("[抖音合集] API响应长度: %d, 前100字节: %s", len(body), string(body[:min(100, len(body))]))
+
+		if len(body) == 0 || body[0] == '<' {
+			lastErr = fmt.Errorf("API返回非JSON")
+			continue
+		}
+
+		// 尝试解析响应
+		info, err := p.parsePlayletResponse(body, mixID)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		log.Printf("[抖音合集] API成功，获取到 %d 个视频", len(info.Videos))
+		return info, nil
 	}
 
-	var result struct {
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return nil, fmt.Errorf("所有API端点都失败")
+}
+
+func (p *CollectionParser) parsePlayletResponse(body []byte, mixID string) (*CollectionInfo, error) {
+	// 尝试 mix/item/list 格式
+	var mixResult struct {
 		StatusCode int    `json:"status_code"`
 		AwemeList  []struct {
 			AwemeID string `json:"aweme_id"`
@@ -194,38 +238,82 @@ func (p *CollectionParser) fetchPlayletByAPI(mixID string) (*CollectionInfo, err
 		} `json:"mix_info"`
 	}
 
-	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, err
-	}
-
-	if result.StatusCode != 0 || len(result.AwemeList) == 0 {
-		return nil, fmt.Errorf("API返回错误或无数据")
-	}
-
-	title := result.MixInfo.MixName
-	if title == "" {
-		title = fmt.Sprintf("抖音短剧_%s", mixID)
-	}
-
-	videos := make([]*CollectionVideoInfo, 0, len(result.AwemeList))
-	for i, aweme := range result.AwemeList {
-		coverURL := ""
-		if len(aweme.Video.Cover.URLList) > 0 {
-			coverURL = aweme.Video.Cover.URLList[0]
+	if err := json.Unmarshal(body, &mixResult); err == nil && mixResult.StatusCode == 0 && len(mixResult.AwemeList) > 0 {
+		title := mixResult.MixInfo.MixName
+		if title == "" {
+			title = fmt.Sprintf("抖音短剧_%s", mixID)
 		}
-		shareURL := aweme.ShareInfo.ShareURL
-		if shareURL == "" {
-			shareURL = fmt.Sprintf("https://www.douyin.com/video/%s", aweme.AwemeID)
+		return p.buildCollectionInfo(mixID, title, mixResult.AwemeList), nil
+	}
+
+	// 尝试 iteminfo 格式
+	var itemResult struct {
+		StatusCode int `json:"status_code"`
+		ItemList   []struct {
+			AwemeID string `json:"aweme_id"`
+			Desc    string `json:"desc"`
+			Author  struct {
+				Nickname string `json:"nickname"`
+			} `json:"author"`
+			Video struct {
+				Cover struct {
+					URLList []string `json:"url_list"`
+				} `json:"cover"`
+				Duration int `json:"duration"`
+			} `json:"video"`
+			ShareInfo struct {
+				ShareURL string `json:"share_url"`
+			} `json:"share_info"`
+		} `json:"item_list"`
+	}
+
+	if err := json.Unmarshal(body, &itemResult); err == nil && itemResult.StatusCode == 0 && len(itemResult.ItemList) > 0 {
+		title := fmt.Sprintf("抖音短剧_%s", mixID)
+		return p.buildCollectionInfo(mixID, title, itemResult.ItemList), nil
+	}
+
+	return nil, fmt.Errorf("无法解析API响应")
+}
+
+func (p *CollectionParser) buildCollectionInfo(mixID, title string, awemeList interface{}) *CollectionInfo {
+	videos := make([]*CollectionVideoInfo, 0)
+
+	switch list := awemeList.(type) {
+	case []struct {
+		AwemeID string `json:"aweme_id"`
+		Desc    string `json:"desc"`
+		Author  struct {
+			Nickname string `json:"nickname"`
+		} `json:"author"`
+		Video struct {
+			Cover struct {
+				URLList []string `json:"url_list"`
+			} `json:"cover"`
+			Duration int `json:"duration"`
+		} `json:"video"`
+		ShareInfo struct {
+			ShareURL string `json:"share_url"`
+		} `json:"share_info"`
+	}:
+		for i, aweme := range list {
+			coverURL := ""
+			if len(aweme.Video.Cover.URLList) > 0 {
+				coverURL = aweme.Video.Cover.URLList[0]
+			}
+			shareURL := aweme.ShareInfo.ShareURL
+			if shareURL == "" {
+				shareURL = fmt.Sprintf("https://www.douyin.com/video/%s", aweme.AwemeID)
+			}
+			videos = append(videos, &CollectionVideoInfo{
+				VideoID:  aweme.AwemeID,
+				URL:      shareURL,
+				Title:    aweme.Desc,
+				Author:   aweme.Author.Nickname,
+				CoverURL: coverURL,
+				Duration: aweme.Video.Duration / 1000,
+				Page:     i + 1,
+			})
 		}
-		videos = append(videos, &CollectionVideoInfo{
-			VideoID:  aweme.AwemeID,
-			URL:      shareURL,
-			Title:    aweme.Desc,
-			Author:   aweme.Author.Nickname,
-			CoverURL: coverURL,
-			Duration: aweme.Video.Duration / 1000,
-			Page:     i + 1,
-		})
 	}
 
 	return &CollectionInfo{
@@ -233,7 +321,7 @@ func (p *CollectionParser) fetchPlayletByAPI(mixID string) (*CollectionInfo, err
 		Title:      title,
 		TotalCount: len(videos),
 		Videos:     videos,
-	}, nil
+	}
 }
 
 func (p *CollectionParser) fetchCollectionByAPI(collectionID string) (*CollectionInfo, error) {
@@ -403,4 +491,11 @@ func IsDouyinCollectionURL(urlStr string) bool {
 	}
 	matched, _ = regexp.MatchString(`iesdouyin\.com/share/playlet/detail/\d+`, urlStr)
 	return matched
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

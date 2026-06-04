@@ -3935,7 +3935,10 @@
             if (url.includes('iesdouyin.com/share/playlet/detail/')) {
                 return true;
             }
-            // 短链接不一定是合集，不在这里判断
+            // 抖音短链接可能是合集，需要后端解析后判断
+            if (url.includes('v.douyin.com/')) {
+                return true; // 先当作合集处理，后端会判断
+            }
             return false;
         }
         
@@ -3980,8 +3983,10 @@
             for (const url of urls) {
                 const trimmedUrl = url.trim();
                 const isDouyinShortLink = trimmedUrl.includes('v.douyin.com/');
+                const isCollection = isCollectionUrl(trimmedUrl);
+                console.log('[DEBUG] addTask:', { trimmedUrl, isCollection, isDouyinShortLink });
 
-                if (isCollectionUrl(trimmedUrl)) {
+                if (isCollection) {
                     let collectionHandled = false;
                     try {
                         addOperationLog('检测到合集链接，正在预览合集内容...', 'info');
@@ -5299,9 +5304,18 @@
                     container.innerHTML = '<div class="empty-state"><div class="empty-icon">❌</div><div class="empty-title">解析失败</div><div class="empty-desc">' + e.message + '</div></div>';
                     addOperationLog('解析视频失败: ' + e.message, 'error');
                 }
-            } else if (url.includes('douyin.com') || url.includes('v.douyin.com')) {
-                // 检测抖音合集URL
-                const isCollection = url.includes('/collection/') || url.includes('playlet/detail/') || url.includes('object_id=');
+            } else if (url.includes('douyin.com') || url.includes('v.douyin.com') || url.includes('iesdouyin.com')) {
+                // 从消息中提取URL（用户可能粘贴的是分享消息）
+                let actualUrl = url;
+                const urlMatch = url.match(/https?:\/\/[^\s]+/);
+                if (urlMatch) {
+                    actualUrl = urlMatch[0];
+                    console.log('[DEBUG] 从消息中提取URL:', actualUrl);
+                }
+
+                // 检测抖音合集URL（短链接也需要尝试合集解析）
+                const isCollection = actualUrl.includes('/collection/') || actualUrl.includes('playlet/detail/') || actualUrl.includes('object_id=') || actualUrl.includes('v.douyin.com/');
+                console.log('[DEBUG] 抖音链接检测:', { originalUrl: url, actualUrl, isCollection });
 
                 if (isCollection) {
                     container.innerHTML = '<div class="empty-state"><div class="loading-spinner" style="width:32px;height:32px;border-width:3px;"></div><div class="empty-title">正在解析抖音合集...</div></div>';
@@ -5310,13 +5324,13 @@
                         const response = await fetch('/api/collections/preview', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ url: url })
+                            body: JSON.stringify({ url: actualUrl })
                         });
 
                         if (response.ok) {
                             const data = await response.json();
-                            previewData = { type: 'collection', url: url, data: data };
-                            setCachedPreview(url, previewData);
+                            previewData = { type: 'collection', url: actualUrl, data: data };
+                            setCachedPreview(actualUrl, previewData);
                             renderCollectionPreview(data);
                             addOperationLog('解析抖音合集成功: ' + data.title + ' (' + (data.total_count || data.count) + '个视频)', 'success');
                         } else {
@@ -5335,14 +5349,14 @@
                         const response = await fetch('/api/tasks', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ url: url, quality: 'preview' })
+                            body: JSON.stringify({ url: actualUrl, quality: 'preview' })
                         });
 
                         if (response.ok) {
                             const task = await response.json();
                             // 检查返回的是合集还是单视频
                             if (task.type === 'collection') {
-                                previewData = { type: 'collection', url: url, data: task };
+                                previewData = { type: 'collection', url: actualUrl, data: task };
                                 setCachedPreview(url, previewData);
                                 renderCollectionPreview(task);
                                 addOperationLog('解析抖音合集成功: ' + task.title + ' (' + (task.total_count || task.count) + '个视频)', 'success');
