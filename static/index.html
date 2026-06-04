@@ -114,6 +114,9 @@
             :root:not([data-theme="light"]) .system-logs-header h2 { color: var(--text-primary); }
             :root:not([data-theme="light"]) .filter-tab { color: var(--text-secondary); }
             :root:not([data-theme="light"]) .filter-tab.active { color: var(--primary); background: rgba(99, 102, 241, 0.15); }
+            :root:not([data-theme="light"]) .logs-container { background: #1a1a2e !important; }
+            :root:not([data-theme="light"]) .system-logs-body .logs-container { background: #1a1a2e !important; }
+            :root:not([data-theme="light"]) .operation-logs-container { background: #1a1a2e !important; }
             /* Auto dark mode - comprehensive overrides with !important */
             :root:not([data-theme="light"]) body { background-color: var(--bg-body) !important; color: var(--text-primary) !important; }
             :root:not([data-theme="light"]) .app-container { background: var(--bg-body) !important; }
@@ -309,6 +312,9 @@
         [data-theme="dark"] .system-logs-header h2 { color: var(--text-primary); }
         [data-theme="dark"] .filter-tab { color: var(--text-secondary); }
         [data-theme="dark"] .filter-tab.active { color: var(--primary); background: rgba(99, 102, 241, 0.15); }
+        [data-theme="dark"] .logs-container { background: #1a1a2e; }
+        [data-theme="dark"] .system-logs-body .logs-container { background: #1a1a2e; }
+        [data-theme="dark"] .operation-logs-container { background: #1a1a2e; }
 
         /* Dark mode - generic override for hardcoded white backgrounds */
         [data-theme="dark"] .header,
@@ -1989,6 +1995,49 @@
             color: white;
         }
 
+        .task-btn {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 500;
+            cursor: pointer;
+            border: none;
+            transition: all 0.2s;
+        }
+
+        .task-btn.delete {
+            background: var(--bg-card, white);
+            color: var(--danger);
+            border: 1px solid var(--danger);
+        }
+
+        .task-btn.delete:hover {
+            background: var(--danger);
+            color: white;
+        }
+
+        .task-btn.subscribe {
+            background: var(--bg-card, white);
+            color: var(--gray-600);
+            border: 1px solid var(--gray-300);
+        }
+
+        .task-btn.subscribe:hover {
+            background: var(--primary);
+            color: white;
+            border-color: var(--primary);
+        }
+
+        .task-btn.subscribe-active {
+            background: var(--primary);
+            color: white;
+            border: 1px solid var(--primary);
+        }
+
+        .task-btn.subscribe-active:hover {
+            background: var(--primary-dark);
+        }
+
         .system-logs-modal {
             position: fixed;
             top: 0;
@@ -3339,7 +3388,6 @@
                 <span class="version-info" id="versionInfo">版本 v0.4.0</span>
             </div>
             <div class="header-actions">
-                <button class="header-btn" onclick="clearCompleted()">清理已完成</button>
                 <button class="header-btn" onclick="showSystemLogs()">系统日志</button>
                 <button class="header-btn primary" onclick="showSettings()">设置</button>
                 <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="切换深色模式">🌙</button>
@@ -3384,6 +3432,10 @@
                             <div class="stat-value" id="statFailed">0</div>
                             <div class="stat-label">失败</div>
                         </div>
+                    </div>
+                    <div style="margin-top:8px;font-size:12px;color:var(--gray-500);display:flex;gap:12px;">
+                        <span>单视频: <strong id="statSingleTotal">0</strong></span>
+                        <span>合集: <strong id="statCollections">0</strong></span>
                     </div>
                 </div>
                 
@@ -3644,6 +3696,8 @@
                 document.getElementById('statDownloading').textContent = stats.downloading;
                 document.getElementById('statCompleted').textContent = stats.completed;
                 document.getElementById('statFailed').textContent = stats.failed;
+                document.getElementById('statSingleTotal').textContent = stats.single_total || 0;
+                document.getElementById('statCollections').textContent = stats.collections_total || 0;
             } catch (e) {
                 console.error('Load stats error:', e);
             }
@@ -4120,55 +4174,54 @@
         function openFolder(path) {
             showToast('请在下载目录中查看文件');
         }
-        
+
         function clearCompleted() {
             const completedTasks = tasks.filter(t => t.status === 'completed');
             const completedCollections = collections.filter(c => c.status === 'completed');
             const totalCount = completedTasks.length + completedCollections.length;
-            
+
             if (totalCount === 0) {
                 showToast('没有已完成的任务');
                 return;
             }
-            
-            showClearConfirmDialog(completedTasks.length, completedCollections.length, (deleteFiles) => {
-                doClearCompleted(completedTasks, completedCollections, deleteFiles);
-            });
-        }
-        
-        function showClearConfirmDialog(taskCount, collectionCount, onConfirm) {
-            const existingDialog = document.getElementById('clearConfirmDialog');
+
+            // 从设置页面读取是否删除文件
+            const deleteFilesCheckbox = document.getElementById('clearCompletedDeleteFiles');
+            const deleteFiles = deleteFilesCheckbox ? deleteFilesCheckbox.checked : false;
+
+            // 使用自定义弹窗确认（比 confirm 更可靠）
+            const existingDialog = document.getElementById('clearCompletedDialog');
             if (existingDialog) existingDialog.remove();
-            
+
             const dialog = document.createElement('div');
-            dialog.id = 'clearConfirmDialog';
+            dialog.id = 'clearCompletedDialog';
             dialog.innerHTML = `
-                <div style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000;">
-                    <div style="background: var(--bg-card, white); border-radius: 12px; padding: 24px; max-width: 400px; width: 90%; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1);">
-                        <h3 style="margin: 0 0 16px 0; font-size: 18px; color: var(--text-primary, #111827);">确认清理</h3>
-                        <p style="margin: 0 0 16px 0; color: var(--text-secondary, #6b7280); line-height: 1.5;">
-                            将清理 <strong>${taskCount}</strong> 个单视频任务和 <strong>${collectionCount}</strong> 个合集任务
+                <div style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:10000;">
+                    <div style="background:var(--bg-card,white);border-radius:12px;padding:24px;max-width:420px;width:90%;box-shadow:0 20px 25px -5px rgba(0,0,0,0.3);">
+                        <h3 style="margin:0 0 12px 0;font-size:18px;color:#dc2626;">⚠️ 确认清理</h3>
+                        <p style="margin:0 0 16px 0;color:var(--text-secondary,#6b7280);line-height:1.5;">
+                            将清理 <strong>${completedTasks.length}</strong> 个单视频任务和 <strong>${completedCollections.length}</strong> 个合集任务
                         </p>
-                        <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 20px; cursor: pointer;">
-                            <input type="checkbox" id="deleteFilesCheckbox" style="width: 18px; height: 18px; accent-color: #6366f1;">
-                            <span style="color: var(--text-primary, #374151);">同时删除本地文件</span>
-                        </label>
-                        <div style="display: flex; gap: 12px; justify-content: flex-end;">
-                            <button onclick="document.getElementById('clearConfirmDialog').remove()" style="padding: 8px 16px; border: 1px solid var(--border-color, #d1d5db); border-radius: 6px; background: var(--bg-card, white); cursor: pointer; color: var(--text-primary, #374151);">取消</button>
-                            <button id="confirmClearBtn" style="padding: 8px 16px; border: none; border-radius: 6px; background: #ef4444; color: white; cursor: pointer;">确认清理</button>
+                        ${deleteFiles ? '<p style="margin:0 0 16px 0;color:#dc2626;font-weight:600;">⚠️ 将同时删除所有本地文件，此操作不可撤销！</p>' : ''}
+                        <div style="display:flex;gap:12px;justify-content:flex-end;">
+                            <button id="clearCompletedCancelBtn" style="padding:8px 16px;border:1px solid var(--border-color,#d1d5db);border-radius:6px;background:var(--bg-card,white);cursor:pointer;color:var(--text-primary,#374151);">取消</button>
+                            <button id="clearCompletedConfirmBtn" style="padding:8px 16px;border:none;border-radius:6px;background:#dc2626;color:white;cursor:pointer;">确认清理</button>
                         </div>
                     </div>
                 </div>
             `;
             document.body.appendChild(dialog);
-            
-            document.getElementById('confirmClearBtn').onclick = () => {
-                const deleteFiles = document.getElementById('deleteFilesCheckbox').checked;
+
+            document.getElementById('clearCompletedCancelBtn').onclick = () => {
                 dialog.remove();
-                onConfirm(deleteFiles);
+            };
+
+            document.getElementById('clearCompletedConfirmBtn').onclick = () => {
+                dialog.remove();
+                doClearCompleted(completedTasks, completedCollections, deleteFiles);
             };
         }
-        
+
         async function doClearCompleted(completedTasks, completedCollections, deleteFiles) {
             for (const task of completedTasks) {
                 try {
@@ -4285,6 +4338,8 @@
                 return;
             }
 
+            const colId = collection.id;
+
             container.innerHTML = collection.videos.map((v, idx) => {
                 const statusClass = v.status || 'pending';
                 const statusText = {
@@ -4299,9 +4354,16 @@
                     `<img src="${getProxyImageUrl(cover, 'bilibili')}" alt="封面" onerror="this.parentElement.innerHTML='<div class=\\'no-cover\\'>🎬</div>'">` :
                     '<div class="no-cover">🎬</div>';
 
+                // 进度条（downloading 状态显示百分比）
+                const progressPercent = v.progress || 0;
                 const progressBar = v.status === 'downloading' ?
-                    `<div class="task-progress" style="margin-top:4px;height:4px;">
-                        <div class="task-progress-bar" style="width:${v.progress || 0}%"></div>
+                    `<div style="margin-top:6px;">
+                        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+                            <div class="task-progress" style="flex:1;height:6px;margin:0;">
+                                <div class="task-progress-bar" style="width:${progressPercent}%"></div>
+                            </div>
+                            <span style="font-size:11px;color:var(--primary);font-weight:600;min-width:35px;text-align:right;">${progressPercent}%</span>
+                        </div>
                     </div>` : '';
 
                 const statusIcon = {
@@ -4310,6 +4372,26 @@
                     'completed': '✅',
                     'failed': '❌'
                 }[statusClass] || '⏳';
+
+                // 操作按钮
+                let actionButtons = '';
+                if (v.status === 'pending' || v.status === 'failed') {
+                    actionButtons = `
+                        <button class="history-btn-compact primary" style="font-size:11px;padding:4px 10px;"
+                            onclick="event.stopPropagation(); downloadSingleCollectionVideo('${colId}', ${idx})">
+                            ⬇ 下载
+                        </button>`;
+                } else if (v.status === 'completed') {
+                    actionButtons = `
+                        <button class="history-btn-compact primary" style="font-size:11px;padding:4px 10px;"
+                            onclick="event.stopPropagation(); openCollectionVideoFile('${colId}', ${idx})">
+                            📂 打开
+                        </button>
+                        <button class="history-btn-compact danger" style="font-size:11px;padding:4px 10px;"
+                            onclick="event.stopPropagation(); deleteCollectionVideoFile('${colId}', ${idx})">
+                            🗑 删除
+                        </button>`;
+                }
 
                 return `
                 <div class="history-item-compact" style="flex-direction:column;">
@@ -4322,14 +4404,58 @@
                             <div class="history-meta-compact">
                                 ${v.author || '未知'} · <span class="status-${statusClass}">${statusText}</span>
                                 ${v.status === 'completed' ? ` · ${formatSize(v.file_size || 0)}` : ''}
-                                ${v.status === 'failed' ? ` · ${v.error_message || '未知错误'}` : ''}
+                                ${v.status === 'failed' && v.error_message ? ` · ${v.error_message}` : ''}
                             </div>
+                        </div>
+                        <div style="display:flex;gap:4px;flex-shrink:0;">
+                            ${actionButtons}
                         </div>
                     </div>
                     ${progressBar}
                 </div>
             `;
             }).join('');
+        }
+
+        // 下载合集中的单个视频
+        async function downloadSingleCollectionVideo(colId, idx) {
+            try {
+                const response = await fetch(`/api/collections/${colId}/videos/${idx}/download`, { method: 'POST' });
+                if (response.ok) {
+                    showToast('下载已启动');
+                    addOperationLog('启动下载合集视频 #' + (idx + 1), 'info');
+                    // 刷新历史显示
+                    setTimeout(() => loadHistory(), 500);
+                } else {
+                    const error = await response.json();
+                    showToast(error.detail || '下载失败');
+                }
+            } catch (e) {
+                showToast('下载失败');
+            }
+        }
+
+        // 删除合集视频文件并重置状态
+        async function deleteCollectionVideoFile(colId, idx) {
+            if (!confirm('确定删除此视频文件？删除后状态将重置为"未下载"')) return;
+            try {
+                const response = await fetch(`/api/collections/${colId}/videos/${idx}/file`, { method: 'DELETE' });
+                if (response.ok) {
+                    showToast('文件已删除，状态已重置');
+                    addOperationLog('删除合集视频文件 #' + (idx + 1), 'info');
+                    loadHistory();
+                } else {
+                    const error = await response.json();
+                    showToast(error.detail || '删除失败');
+                }
+            } catch (e) {
+                showToast('删除失败');
+            }
+        }
+
+        // 打开合集视频文件所在目录
+        function openCollectionVideoFile(colId, idx) {
+            showToast('请在下载目录中查看文件');
         }
 
         function renderHistory(historyTasks) {
@@ -4453,10 +4579,20 @@
                     </div>
                     <div class="task-title">${col.title || '未知合集'}</div>
                     <div class="task-author">${col.author || '未知作者'} · ${completedVideos}/${totalVideos} 个视频</div>
-                    <button class="task-btn delete" onclick="event.stopPropagation(); deleteCollection('${col.id}')" style="position: absolute; bottom: 8px; right: 8px;">删除</button>
+                    <div style="position: absolute; bottom: 8px; right: 8px; display: flex; gap: 6px;">
+                        <button class="task-btn ${col.subscribed ? 'subscribe-active' : 'subscribe'}" onclick="event.stopPropagation(); toggleSubscribe('${col.id}')" title="${col.subscribed ? '点击取消订阅' : '点击订阅，每小时自动刷新'}">
+                            ${col.subscribed ? '🔔 已订阅' : '🔕 订阅'}
+                        </button>
+                        <button class="task-btn delete" onclick="event.stopPropagation(); deleteCollection('${col.id}')">删除</button>
+                    </div>
                     ${col.status === 'downloading' ? `
                         <div class="task-progress">
                             <div class="task-progress-bar" style="width: ${progress}%"></div>
+                        </div>
+                    ` : ''}
+                    ${col.subscribed ? `
+                        <div style="font-size: 11px; color: var(--primary); margin-top: 4px;">
+                            ⏱ 每 ${col.refresh_interval || 60} 分钟刷新
                         </div>
                     ` : ''}
                 </div>
@@ -4464,25 +4600,103 @@
         }
         
         async function deleteCollection(id) {
-            if (!confirm('确定要删除这个合集任务吗？')) return;
+            // 弹窗确认，支持删除文件
+            const col = collections.find(c => c.id === id);
+            const colTitle = col ? col.title : '未知合集';
+
+            // 移除已存在的弹窗
+            const existingDialog = document.getElementById('deleteCollectionDialog');
+            if (existingDialog) existingDialog.remove();
+
+            const dialog = document.createElement('div');
+            dialog.id = 'deleteCollectionDialog';
+            dialog.innerHTML = `
+                <div style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:10000;">
+                    <div style="background:var(--bg-card,white);border-radius:12px;padding:24px;max-width:400px;width:90%;box-shadow:0 20px 25px -5px rgba(0,0,0,0.3);">
+                        <h3 style="margin:0 0 12px 0;font-size:18px;color:var(--text-primary,#111827);">删除合集</h3>
+                        <p style="margin:0 0 16px 0;color:var(--text-secondary,#6b7280);line-height:1.5;">
+                            确定要删除合集 <strong>${colTitle}</strong> 吗？
+                        </p>
+                        <div style="display:flex;align-items:center;gap:8px;margin-bottom:20px;">
+                            <input type="checkbox" id="deleteColFilesCheckbox" style="width:18px;height:18px;accent-color:#ef4444;">
+                            <label for="deleteColFilesCheckbox" style="color:#ef4444;font-weight:500;cursor:pointer;">同时删除已下载的视频文件</label>
+                        </div>
+                        <div style="display:flex;gap:12px;justify-content:flex-end;">
+                            <button id="cancelDeleteColBtn" style="padding:8px 16px;border:1px solid var(--border-color,#d1d5db);border-radius:6px;background:var(--bg-card,white);cursor:pointer;color:var(--text-primary,#374151);">取消</button>
+                            <button id="confirmDeleteColBtn" style="padding:8px 16px;border:none;border-radius:6px;background:#ef4444;color:white;cursor:pointer;">确认删除</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(dialog);
+
+            // 取消按钮
+            document.getElementById('cancelDeleteColBtn').onclick = (e) => {
+                e.stopPropagation();
+                dialog.remove();
+            };
+
+            // 确认删除按钮
+            document.getElementById('confirmDeleteColBtn').onclick = async (e) => {
+                e.stopPropagation();
+                const deleteFiles = document.getElementById('deleteColFilesCheckbox').checked;
+                console.log('[DEBUG] deleteCollection: deleteFiles=', deleteFiles, 'checkbox checked=', document.getElementById('deleteColFilesCheckbox').checked);
+                dialog.remove();
+
+                try {
+                    const url = deleteFiles ? '/api/collections/' + id + '?deleteFile=true' : '/api/collections/' + id;
+                    const response = await fetch(url, { method: 'DELETE' });
+                    if (response.ok) {
+                        addOperationLog('删除合集任务成功' + (deleteFiles ? '（含本地文件）' : ''), 'success');
+                        showToast('合集已删除' + (deleteFiles ? '（含本地文件）' : ''));
+                        if (selectedCollectionId === id) {
+                            selectedCollectionId = null;
+                            clearPreview();
+                        }
+                        loadCollections();
+                        loadHistory();
+                    } else {
+                        showToast('删除失败');
+                    }
+                } catch (e) {
+                    showToast('删除失败');
+                }
+            };
+        }
+
+        async function toggleSubscribe(colId) {
+            const col = collections.find(c => c.id === colId);
+            if (!col) return;
+
+            const newState = !col.subscribed;
 
             try {
-                const response = await fetch('/api/collections/' + id, { method: 'DELETE' });
+                const response = await fetch(`/api/collections/${colId}/subscribe`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        subscribe: newState,
+                        refresh_interval: 60
+                    })
+                });
+
                 if (response.ok) {
-                    addOperationLog('删除合集任务成功', 'success');
-                    // 如果删除的是当前选中的合集，清除选中状态和预览
-                    if (selectedCollectionId === id) {
-                        selectedCollectionId = null;
-                        clearPreview();
-                    }
-                    loadCollections();
-                    loadHistory();
+                    const result = await response.json();
+                    col.subscribed = result.subscribed;
+                    col.last_refresh = result.last_refresh;
+                    col.refresh_interval = result.refresh_interval;
+                    renderCollections();
+                    addOperationLog(`${newState ? '开启' : '关闭'}订阅: ${col.title}`, 'info');
+                    showToast(newState ? '已开启订阅，每小时自动刷新' : '已关闭订阅');
+                } else {
+                    const error = await response.json();
+                    showToast(error.detail || '操作失败');
                 }
             } catch (e) {
-                showToast('删除失败');
+                showToast('操作失败');
             }
         }
-        
+
         function selectCollection(id) {
             selectedCollectionId = id;
             selectedTaskId = null;
@@ -4503,96 +4717,8 @@
             }
         }
         
-        async function loadCollectionHistory(id) {
-            try {
-                const response = await fetch('/api/collections/' + id + '/videos');
-                if (response.ok) {
-                    const videos = await response.json();
-                    renderCollectionHistory(videos);
-                }
-            } catch (e) {
-                console.error('加载合集历史失败:', e);
-            }
-        }
-        
-        function renderCollectionHistory(videos) {
-            const container = document.getElementById('historyList');
-            if (!container) return;
-            
-            console.log('Rendering collection history:', videos);
-            
-            const completedVideos = videos.filter(v => v.status === 'completed');
-            const failedVideos = videos.filter(v => v.status === 'failed');
-            const pendingVideos = videos.filter(v => v.status === 'pending' || v.status === 'downloading');
-            
-            const allVideos = [...completedVideos, ...pendingVideos, ...failedVideos];
-            
-            if (allVideos.length === 0) {
-                container.innerHTML = `
-                    <div class="empty-state">
-                        <div class="empty-icon">📁</div>
-                        <div class="empty-title">暂无下载记录</div>
-                        <div class="empty-desc">合集中的视频下载记录将显示在这里</div>
-                    </div>
-                `;
-                return;
-            }
-            
-            container.innerHTML = allVideos.map(v => {
-                const statusClass = v.status === 'completed' ? 'completed' : v.status === 'failed' ? 'failed' : 'pending';
-                const statusText = v.status === 'completed' ? '已完成' : v.status === 'failed' ? '失败' : v.status === 'downloading' ? '下载中' : '等待中';
-                const videoId = v.id || v.ID;
-                console.log('Video ID:', videoId, 'Full video:', v);
-                return `
-                <div class="history-item collection-history-item">
-                    <div class="history-cover">
-                        <img src="${getProxyImageUrl(v.cover_url || v.CoverURL, 'bilibili')}" alt="封面" onerror="this.parentElement.innerHTML='<div class=\\'no-cover\\'>🎬</div>'">
-                    </div>
-                    <div class="history-info">
-                        <div class="history-title">
-                            <span class="platform-badge bilibili">B站</span>
-                            ${v.title || v.Title || '未知标题'}
-                        </div>
-                        <div class="history-meta">
-                            <span>作者: ${v.author || v.Author || '未知'}</span>
-                            <span>大小: ${formatFileSize(v.file_size || v.FileSize) || '0 B'}</span>
-                            <span>清晰度: ${(v.quality || '未知').toUpperCase()}</span>
-                        </div>
-                        <div class="history-time">
-                            <span class="task-status ${statusClass}">${statusText}</span>
-                            ${v.error_message || v.ErrorMessage ? '<span style="color: #dc3545;"> - ' + (v.error_message || v.ErrorMessage) + '</span>' : ''}
-                        </div>
-                    </div>
-                    <div class="history-actions">
-                        <button class="history-btn danger" onclick="deleteCollectionVideo('${videoId}')">删除</button>
-                    </div>
-                </div>
-            `}).join('');
-        }
-        
-        async function deleteCollectionVideo(videoId) {
-            if (!confirm('确定要删除这个视频吗？')) return;
-            
-            console.log('Deleting collection video:', videoId);
-            
-            try {
-                const response = await fetch('/api/collections/videos/' + videoId, { method: 'DELETE' });
-                console.log('Delete response:', response.status);
-                if (response.ok) {
-                    showToast('删除成功');
-                    if (selectedCollectionId) {
-                        loadCollectionHistory(selectedCollectionId);
-                    }
-                } else {
-                    const error = await response.json();
-                    console.error('Delete error:', error);
-                    showToast('删除失败: ' + (error.detail || '未知错误'));
-                }
-            } catch (e) {
-                console.error('Delete exception:', e);
-                showToast('删除失败');
-            }
-        }
+        // 注意：renderCollectionHistory 已在上方定义，此处不需要重复定义
+        // loadCollectionHistory 功能已整合到 loadHistory 中
         
         function renderCollectionVideosPreview(videos) {
             const container = document.getElementById('previewContainer');
@@ -4757,22 +4883,30 @@
         function renderLogsModal() {
             const container = document.getElementById('logsContainerModal');
             if (!container) return;
-            
+
             if (logsModal.length === 0) {
                 container.innerHTML = '<div style="color: var(--gray-400); text-align: center; padding: 40px;">暂无日志</div>';
                 return;
             }
-            
-            container.innerHTML = logsModal.map(log => `
+
+            container.innerHTML = logsModal.map(log => {
+                // 兼容两种时间格式: ISO "2026-06-04T01:08:30Z" 和普通 "2026-06-04 01:08:30"
+                let timeStr = log.timestamp || '';
+                if (timeStr.includes('T')) {
+                    timeStr = timeStr.split('T')[1].split('.')[0];
+                } else if (timeStr.includes(' ')) {
+                    timeStr = timeStr.split(' ')[1] || timeStr;
+                }
+                return `
                 <div class="log-entry">
-                    <span class="log-time">${log.timestamp.split('T')[1].split('.')[0]}</span>
+                    <span class="log-time">${timeStr}</span>
                     <span class="log-level ${log.level}">${log.level}</span>
                     <span class="log-task">${log.task_id || '-'}</span>
                     <span class="log-message">${escapeHtml(log.message)}</span>
                     ${log.details ? `<span class="log-details">${escapeHtml(log.details)}</span>` : ''}
-                </div>
-            `).join('');
-            
+                </div>`;
+            }).join('');
+
             container.scrollTop = container.scrollHeight;
         }
 
@@ -4813,19 +4947,6 @@
                 }
             } catch (e) {
                 bilibiliCookieStatus = '<span style="color: var(--gray-500);">未知</span>';
-            }
-
-            let douyinCookieStatus = '';
-            try {
-                const resp = await fetch('/api/douyin/cookie');
-                const data = await resp.json();
-                if (data.has_cookie) {
-                    douyinCookieStatus = '<span style="color: var(--success);">已登录</span>';
-                } else {
-                    douyinCookieStatus = '<span style="color: var(--warning);">未登录</span>';
-                }
-            } catch (e) {
-                douyinCookieStatus = '<span style="color: var(--gray-500);">未知</span>';
             }
 
             let currentDownloadDir = '';
@@ -4872,22 +4993,6 @@
                         </div>
 
                         <div style="margin-bottom: 24px; padding: 16px; background: var(--gray-50); border-radius: 8px;">
-                            <h4 style="margin: 0 0 12px 0; font-size: 16px;">🔐 抖音登录</h4>
-                            <p style="font-size: 13px; color: var(--gray-600); margin-bottom: 12px;">
-                                登录抖音可以下载高清视频（最高4K），未登录仅能获取720p。
-                                <br>状态：${douyinCookieStatus}
-                            </p>
-                            <div style="display: flex; gap: 8px;">
-                                <button class="modal-btn" style="background: var(--primary); color: white; border: none;" onclick="loginDouyin()">一键登录抖音</button>
-                                <button class="modal-btn" onclick="clearDouyinCookie()">清除Cookie</button>
-                            </div>
-                            <p style="font-size: 12px; color: var(--gray-500); margin-top: 8px; line-height: 1.6;">
-                                📌 使用步骤：点击按钮 → Chrome浏览器自动打开抖音 → 扫码或手机号登录 → 登录成功后自动获取Cookie<br>
-                                ⏱ 登录窗口有效期2分钟，超时需重新点击
-                            </p>
-                        </div>
-
-                        <div style="margin-bottom: 24px; padding: 16px; background: var(--gray-50); border-radius: 8px;">
                             <h4 style="margin: 0 0 12px 0; font-size: 16px;">B站Cookie设置</h4>
                             <p style="font-size: 13px; color: var(--gray-600); margin-bottom: 12px;">
                                 配置B站Cookie可以下载更高清晰度的视频（如1080P+、4K）。大会员可下载会员专属视频。
@@ -4907,7 +5012,21 @@
                                 获取方法：登录B站 → F12打开开发者工具 → Network → 刷新页面 → 点击任意请求 → Headers → 复制Cookie值
                             </p>
                         </div>
-                        
+
+                        <div style="margin-bottom: 24px; padding: 16px; background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px;">
+                            <h4 style="margin: 0 0 12px 0; font-size: 16px; color: #dc2626;">⚠️ 危险操作</h4>
+                            <p style="font-size: 13px; color: #991b1b; margin-bottom: 12px;">
+                                清理所有已完成的任务（单视频 + 合集），此操作不可撤销。
+                            </p>
+                            <div style="display: flex; gap: 8px; align-items: center;">
+                                <button class="modal-btn" style="background: #dc2626; color: white; border: none;" onclick="clearCompleted()">清理所有已完成任务</button>
+                                <div style="display: flex; align-items: center; gap: 6px; font-size: 13px; color: #991b1b;">
+                                    <input type="checkbox" id="clearCompletedDeleteFiles" style="width: 16px; height: 16px; accent-color: #dc2626;" onclick="event.stopPropagation()">
+                                    <span>同时删除本地文件</span>
+                                </div>
+                            </div>
+                        </div>
+
                         <div class="changelog-section">
                             <h4>更新日志</h4>
                             <div class="changelog-item">
@@ -5013,52 +5132,6 @@
             }
         }
 
-        async function loginDouyin() {
-            showToast('正在启动浏览器，请在弹出的Chrome窗口中登录抖音...');
-            const btn = event.target;
-            const origText = btn.textContent;
-            btn.textContent = '等待登录中...';
-            btn.disabled = true;
-            try {
-                const response = await fetch('/api/douyin/login', { method: 'POST', signal: AbortSignal.timeout(130000) });
-                const data = await response.json();
-                if (data.success) {
-                    showToast('🎉 抖音登录成功！');
-                    document.querySelector('.modal-overlay').remove();
-                    showSettings();
-                } else {
-                    showToast(data.message || '登录失败');
-                }
-            } catch (e) {
-                if (e.name === 'TimeoutError') {
-                    showToast('登录超时，请重试');
-                } else {
-                    showToast('登录失败: ' + e.message);
-                }
-            } finally {
-                btn.textContent = origText;
-                btn.disabled = false;
-            }
-        }
-
-        async function clearDouyinCookie() {
-            try {
-                const response = await fetch('/api/douyin/cookie', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ cookie: '' })
-                });
-                
-                if (response.ok) {
-                    showToast('抖音Cookie已清除');
-                    document.querySelector('.modal-overlay').remove();
-                    showSettings();
-                }
-            } catch (e) {
-                showToast('清除失败');
-            }
-        }
-
         async function clearBilibiliCookie() {
             try {
                 const response = await fetch('/api/bilibili/cookie', {
@@ -5091,6 +5164,23 @@
                 }
             } catch (e) {
                 showToast('登录失败');
+            }
+        }
+
+        async function toggleConsoleWindow(show) {
+            try {
+                const response = await fetch('/api/console/toggle', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ show: show })
+                });
+                if (response.ok) {
+                    showToast(show ? '控制台窗口已显示' : '控制台窗口已隐藏');
+                } else {
+                    showToast('操作失败');
+                }
+            } catch (e) {
+                showToast('操作失败');
             }
         }
 
@@ -5487,40 +5577,46 @@
                 showToast('请先解析合集');
                 return;
             }
-            
-            const checkboxes = document.querySelectorAll('.video-checkbox:checked');
-            if (checkboxes.length === 0) {
+
+            const checkboxes = document.querySelectorAll('.video-checkbox');
+            const checkedBoxes = document.querySelectorAll('.video-checkbox:checked');
+            if (checkedBoxes.length === 0) {
                 showToast('请选择要下载的视频');
                 return;
             }
-            
-            const selectedVIDs = Array.from(checkboxes).map(cb => cb.dataset.vid);
-            const selectedVideos = previewData.data.videos.filter(v => {
-                const vid = v.bvid || v.video_id || v.url;
-                return selectedVIDs.includes(vid);
+
+            // 获取选中的索引（保留全部视频，只标记选中的）
+            const selectedIndices = [];
+            checkboxes.forEach((cb, idx) => {
+                if (cb.checked) {
+                    selectedIndices.push(idx);
+                }
             });
-            
+
             const quality = document.getElementById('qualitySelect').value;
             const data = previewData.data;
-            
+
             try {
                 const response = await fetch('/api/collections', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         url: previewData.url,
-                        title: data.title + ' (选中)',
-                        videos: selectedVideos,
-                        quality: quality
+                        title: data.title,
+                        videos: data.videos,
+                        quality: quality,
+                        auto_download: true,
+                        selected_indices: selectedIndices
                     })
                 });
-                
+
                 if (response.ok) {
-                    addOperationLog('创建选中视频下载任务: ' + selectedVideos.length + ' 个视频', 'success');
-                    showToast('已创建 ' + selectedVideos.length + ' 个视频的下载任务');
+                    addOperationLog('创建合集任务: 选中 ' + selectedIndices.length + '/' + data.videos.length + ' 个视频下载', 'success');
+                    showToast('合集已创建，' + selectedIndices.length + ' 个视频开始下载');
                     document.getElementById('urlInput').value = '';
                     clearPreview();
-                    loadTasks();
+                    loadCollections();
+                    switchTaskMode('collection');
                 } else {
                     const error = await response.json();
                     showToast('创建失败: ' + error.detail);
@@ -5531,14 +5627,35 @@
         }
         
         document.addEventListener('click', function(e) {
-            const taskList = document.getElementById('taskList');
             const sidebar = document.querySelector('.sidebar');
-            if (!taskList || !sidebar) return;
-            
-            if (!sidebar.contains(e.target) && !e.target.closest('.task-item')) {
-                if (selectedTaskId && !e.target.closest('.preview-card')) {
-                    clearPreview();
-                }
+            const middlePanel = document.querySelector('.middle-panel');
+            const contentArea = document.querySelector('.content-area');
+            if (!sidebar) return;
+
+            // 点击的是任务项（单视频或合集），不处理
+            if (e.target.closest('.task-item')) return;
+
+            // 点击的是预览区域内的按钮（如下载、删除等），不处理
+            if (e.target.closest('.preview-card') || e.target.closest('.collection-preview')) return;
+
+            // 点击的是URL输入框或添加按钮，不处理
+            if (e.target.closest('.sidebar-section')) return;
+
+            // 点击的是中间面板（任务列表区域）但不是任务项，清空预览
+            if (middlePanel && middlePanel.contains(e.target)) {
+                clearPreview();
+                return;
+            }
+
+            // 点击的是右侧内容区域（下载历史等），清空预览
+            if (contentArea && contentArea.contains(e.target)) {
+                clearPreview();
+                return;
+            }
+
+            // 点击的是header或其他区域，清空预览
+            if (!sidebar.contains(e.target)) {
+                clearPreview();
             }
         });
         
@@ -5572,22 +5689,29 @@
         function renderLogs() {
             const container = document.getElementById('logsContainer');
             if (!container) return;
-            
+
             if (logs.length === 0) {
                 container.innerHTML = '<div style="color: var(--gray-400); text-align: center; padding: 40px;">暂无日志</div>';
                 return;
             }
-            
-            container.innerHTML = logs.map(log => `
+
+            container.innerHTML = logs.map(log => {
+                let timeStr = log.timestamp || '';
+                if (timeStr.includes('T')) {
+                    timeStr = timeStr.split('T')[1].split('.')[0];
+                } else if (timeStr.includes(' ')) {
+                    timeStr = timeStr.split(' ')[1] || timeStr;
+                }
+                return `
                 <div class="log-entry">
-                    <span class="log-time">${log.timestamp.split('T')[1].split('.')[0]}</span>
+                    <span class="log-time">${timeStr}</span>
                     <span class="log-level ${log.level}">${log.level}</span>
                     <span class="log-task">${log.task_id || '-'}</span>
                     <span class="log-message">${escapeHtml(log.message)}</span>
                     ${log.details ? `<span class="log-details">${escapeHtml(log.details)}</span>` : ''}
-                </div>
-            `).join('');
-            
+                </div>`;
+            }).join('');
+
             container.scrollTop = container.scrollHeight;
         }
         

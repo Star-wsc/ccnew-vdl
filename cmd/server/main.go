@@ -38,6 +38,9 @@ func killPortProcess(port string) {
 }
 
 func main() {
+	// 立即隐藏控制台窗口（在任何输出之前）
+	hideConsoleWindow()
+
 	cfg := config.Load()
 
 	os.MkdirAll(cfg.DownloadDir, 0755)
@@ -45,6 +48,14 @@ func main() {
 
 	mgr := download.NewManager(cfg)
 	h := NewHandlers(cfg, mgr)
+
+	// 加载持久化的合集数据
+	if err := h.loadCollections(); err != nil {
+		log.Printf("[WARN] 加载合集数据失败: %v", err)
+	}
+
+	// 启动订阅检查器
+	h.startSubscriptionChecker()
 
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
@@ -62,9 +73,6 @@ func main() {
 	r.GET("/api/bilibili/cookie", h.GetBilibiliCookie)
 	r.POST("/api/bilibili/login", h.LoginBilibili)
 	r.GET("/api/bilibili/login/poll", h.PollBilibiliLogin)
-	r.POST("/api/douyin/login", h.LoginDouyin)
-	r.GET("/api/douyin/cookie", h.GetDouyinCookie)
-	r.POST("/api/douyin/cookie", h.ClearDouyinCookie)
 	r.GET("/api/proxy/image", h.ProxyImage)
 	r.GET("/api/proxy/file", h.ProxyFileDownload)
 	r.POST("/api/tasks", h.CreateTask)
@@ -79,6 +87,8 @@ func main() {
 	r.GET("/api/logs", h.GetLogs)
 	r.DELETE("/api/logs", h.ClearLogs)
 	r.POST("/api/settings", h.SaveSettings)
+	r.GET("/api/console/visible", h.GetConsoleVisible)
+	r.POST("/api/console/toggle", h.ToggleConsoleWindow)
 
 	r.POST("/api/collections/preview", h.PreviewCollection)
 	r.POST("/api/collections", h.CreateCollection)
@@ -88,6 +98,9 @@ func main() {
 	r.GET("/api/collections/:id/videos", h.GetCollectionVideos)
 	r.DELETE("/api/collections/:id", h.DeleteCollection)
 	r.DELETE("/api/collections/videos/:id", h.DeleteCollectionVideo)
+	r.POST("/api/collections/:id/videos/:idx/download", h.DownloadCollectionVideo)
+	r.DELETE("/api/collections/:id/videos/:idx/file", h.DeleteCollectionVideoFile)
+	r.POST("/api/collections/:id/subscribe", h.ToggleCollectionSubscribe)
 
 	// 获取可执行文件所在目录
 	exePath, _ := os.Executable()

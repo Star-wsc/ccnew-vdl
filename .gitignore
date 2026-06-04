@@ -1,0 +1,25 @@
+# 编译产物
+server.exe
+*.exe
+*.exe~
+
+# 临时文件
+temp_video_*.m4s
+*.tmp
+
+# 日志文件
+ccnew-vdl-launch.log
+
+# 运行时数据
+logs/tasks.json
+logs/collections.json
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+Desktop.ini

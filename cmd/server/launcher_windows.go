@@ -29,9 +29,14 @@ func launchDesktopWindow(port string, quit chan os.Signal) {
 		return
 	}
 
-	// 启动PowerShell脚本
-	cmd := exec.Command("powershell.exe", "-ExecutionPolicy", "Bypass", "-File", ps1Path)
+	// 启动PowerShell脚本（隐藏窗口）
+	cmd := exec.Command("powershell.exe", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", ps1Path)
 	cmd.Dir = exeDir
+	// 设置进程不显示窗口
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		HideWindow:    true,
+		CreationFlags: 0x08000000, // CREATE_NO_WINDOW
+	}
 
 	if err := cmd.Start(); err != nil {
 		log.Printf("PowerShell启动失败: %v", err)
