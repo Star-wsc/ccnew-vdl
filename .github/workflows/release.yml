@@ -17,22 +17,16 @@ jobs:
           - goos: linux
             goarch: amd64
             ldflags: ""
-            ffmpeg_url: "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz"
-            ffmpeg_inner: "ffmpeg-master-latest-linux64-gpl/bin/ffmpeg"
             ffmpeg_name: "ffmpeg-linux-amd64"
             suffix: ""
           - goos: linux
             goarch: arm64
             ldflags: ""
-            ffmpeg_url: "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linuxarm64-gpl.tar.xz"
-            ffmpeg_inner: "ffmpeg-master-latest-linuxarm64-gpl/bin/ffmpeg"
             ffmpeg_name: "ffmpeg-linux-arm64"
             suffix: ""
           - goos: windows
             goarch: amd64
             ldflags: "-H=windowsgui"
-            ffmpeg_url: "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
-            ffmpeg_inner: "ffmpeg-master-latest-win64-gpl/bin/ffmpeg.exe"
             ffmpeg_name: "ffmpeg-windows-amd64.exe"
             suffix: ".exe"
     steps:
@@ -49,26 +43,12 @@ jobs:
           CGO_ENABLED: '0'
         run: go build -ldflags "${{ matrix.ldflags }}" -o server${{ matrix.suffix }} ./cmd/server/
 
-      - name: Download FFmpeg
-        run: |
-          mkdir -p ffmpeg
-          wget -q "${{ matrix.ffmpeg_url }}" -O ffmpeg-archive
-          if [[ "${{ matrix.ffmpeg_url }}" == *.tar.xz ]]; then
-            tar xf ffmpeg-archive
-          else
-            unzip -q ffmpeg-archive
-          fi
-          cp ${{ matrix.ffmpeg_inner }} ffmpeg/${{ matrix.ffmpeg_name }}
-          chmod +x ffmpeg/${{ matrix.ffmpeg_name }} 2>/dev/null || true
-          rm -rf ffmpeg-archive ffmpeg-master-*
-
       - name: Package
         run: |
-          mkdir -p dist/ccnew-vdl
+          mkdir -p dist/ccnew-vdl/ffmpeg
           cp server${{ matrix.suffix }} dist/ccnew-vdl/
           cp -r static dist/ccnew-vdl/
           cp -r webview2 dist/ccnew-vdl/
-          mkdir -p dist/ccnew-vdl/ffmpeg
           cp ffmpeg/${{ matrix.ffmpeg_name }} dist/ccnew-vdl/ffmpeg/
           cp start-desktop.bat dist/ccnew-vdl/ 2>/dev/null || true
           cp config.json.example dist/ccnew-vdl/ 2>/dev/null || true
