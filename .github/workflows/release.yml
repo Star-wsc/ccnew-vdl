@@ -17,12 +17,15 @@ jobs:
           - goos: linux
             goarch: amd64
             suffix: ""
+            ldflags: ""
           - goos: linux
             goarch: arm64
             suffix: ""
+            ldflags: ""
           - goos: windows
             goarch: amd64
             suffix: ".exe"
+            ldflags: "-H=windowsgui"
     steps:
       - uses: actions/checkout@v4
 
@@ -35,7 +38,7 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: '0'
-        run: go build -o server${{ matrix.suffix }} ./cmd/server/
+        run: go build -ldflags "${{ matrix.ldflags }}" -o server${{ matrix.suffix }} ./cmd/server/
 
       - name: Package
         run: |
@@ -117,7 +120,7 @@ jobs:
         run: |
           if [ -z "${{ secrets.DOCKERHUB_TOKEN }}" ]; then
             echo "skip=true" >> $GITHUB_OUTPUT
-            echo "DOCKERHUB_TOKEN not set, skipping Docker build"
+            echo "DOCKERHUB_TOKEN not set, skipping"
           else
             echo "skip=false" >> $GITHUB_OUTPUT
           fi
