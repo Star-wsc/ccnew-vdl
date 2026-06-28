@@ -44,5 +44,4 @@ downloads/
 # 安装包产物
 ccnew-vdl-setup.exe
 
-# WebView2 运行时（CI 自动下载）
-webview2/
+
