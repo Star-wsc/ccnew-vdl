@@ -5268,7 +5268,7 @@
                     if (response.ok) {
                         const data = await response.json();
                         previewData = { type: 'collection', url: url, data: data };
-                        setCachedPreview(actualUrl, previewData);
+                        setCachedPreview(url, previewData);
                         renderCollectionPreview(data);
                         addOperationLog('解析合集成功: ' + data.title + ' (' + data.total_count + '个视频)', 'success');
                     } else {
@@ -5292,8 +5292,8 @@
                     
                     if (response.ok) {
                         const task = await response.json();
-                        previewData = { type: 'single', url: actualUrl, data: task };
-                        setCachedPreview(actualUrl, previewData);
+                        previewData = { type: 'single', url: url, data: task };
+                        setCachedPreview(url, previewData);
                         renderSingleVideoPreview(task);
                         addOperationLog('解析视频成功: ' + (task.title || '未知标题'), 'success');
                     } else {
