@@ -57,6 +57,11 @@ func (p *CollectionParser) ParseCollection(urlStr string) (*CollectionInfo, erro
 		resolvedURL = realURL
 	}
 
+	// 先识别明显是单视频的链接，避免误入合集解析
+	if isLikelySingleVideoURL(resolvedURL) {
+		return nil, fmt.Errorf("该链接不是合集链接，请使用视频解析接口: %s", urlStr)
+	}
+
 	// 提取合集ID
 	collectionID, contentType, err := extractCollectionID(resolvedURL)
 	if err != nil {
@@ -498,4 +503,19 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+func isLikelySingleVideoURL(u string) bool {
+	if strings.Contains(u, "/video/") {
+		return true
+	}
+	if strings.Contains(u, "/note/") {
+		return true
+	}
+	if strings.Contains(u, "iesdouyin.com/share/video/") {
+		return true
+	}
+	if strings.Contains(u, "modal_id=") {
+		return true
+	}
+	return false
 }

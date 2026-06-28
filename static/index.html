@@ -4,6 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>抖音B站视频解析工具</title>
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
     <style>
         * {
             margin: 0;
@@ -3935,10 +3938,7 @@
             if (url.includes('iesdouyin.com/share/playlet/detail/')) {
                 return true;
             }
-            // 抖音短链接可能是合集，需要后端解析后判断
-            if (url.includes('v.douyin.com/')) {
-                return true; // 先当作合集处理，后端会判断
-            }
+            // v.douyin.com is a generic short link, not always a collection
             return false;
         }
         
@@ -5267,7 +5267,7 @@
                     if (response.ok) {
                         const data = await response.json();
                         previewData = { type: 'collection', url: url, data: data };
-                        setCachedPreview(url, previewData);
+                        setCachedPreview(actualUrl, previewData);
                         renderCollectionPreview(data);
                         addOperationLog('解析合集成功: ' + data.title + ' (' + data.total_count + '个视频)', 'success');
                     } else {
@@ -5291,8 +5291,8 @@
                     
                     if (response.ok) {
                         const task = await response.json();
-                        previewData = { type: 'single', url: url, data: task };
-                        setCachedPreview(url, previewData);
+                        previewData = { type: 'single', url: actualUrl, data: task };
+                        setCachedPreview(actualUrl, previewData);
                         renderSingleVideoPreview(task);
                         addOperationLog('解析视频成功: ' + (task.title || '未知标题'), 'success');
                     } else {
@@ -5313,68 +5313,30 @@
                     console.log('[DEBUG] 从消息中提取URL:', actualUrl);
                 }
 
-                // 检测抖音合集URL（短链接也需要尝试合集解析）
-                const isCollection = actualUrl.includes('/collection/') || actualUrl.includes('playlet/detail/') || actualUrl.includes('object_id=') || actualUrl.includes('v.douyin.com/');
-                console.log('[DEBUG] 抖音链接检测:', { originalUrl: url, actualUrl, isCollection });
+                // 所有抖音链接（包括短链接）统一走单视频解析接口，合集功能暂时屏蔽
+                container.innerHTML = '<div class="empty-state"><div class="loading-spinner" style="width:32px;height:32px;border-width:3px;"></div><div class="empty-title">正在解析抖音视频...</div></div>';
 
-                if (isCollection) {
-                    container.innerHTML = '<div class="empty-state"><div class="loading-spinner" style="width:32px;height:32px;border-width:3px;"></div><div class="empty-title">正在解析抖音合集...</div></div>';
+                try {
+                    const response = await fetch('/api/tasks', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ url: actualUrl, quality: 'preview' })
+                    });
 
-                    try {
-                        const response = await fetch('/api/collections/preview', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ url: actualUrl })
-                        });
-
-                        if (response.ok) {
-                            const data = await response.json();
-                            previewData = { type: 'collection', url: actualUrl, data: data };
-                            setCachedPreview(actualUrl, previewData);
-                            renderCollectionPreview(data);
-                            addOperationLog('解析抖音合集成功: ' + data.title + ' (' + (data.total_count || data.count) + '个视频)', 'success');
-                        } else {
-                            const error = await response.json();
-                            container.innerHTML = '<div class="empty-state"><div class="empty-icon">❌</div><div class="empty-title">解析失败</div><div class="empty-desc">' + (error.detail || '未知错误') + '</div></div>';
-                            addOperationLog('解析抖音合集失败: ' + (error.detail || '未知错误'), 'error');
-                        }
-                    } catch (e) {
-                        container.innerHTML = '<div class="empty-state"><div class="empty-icon">❌</div><div class="empty-title">解析失败</div><div class="empty-desc">' + e.message + '</div></div>';
-                        addOperationLog('解析抖音合集失败: ' + e.message, 'error');
+                    if (response.ok) {
+                        const task = await response.json();
+                        previewData = { type: 'single', url: actualUrl, data: task };
+                        setCachedPreview(actualUrl, previewData);
+                        renderSingleVideoPreview(task);
+                        addOperationLog('解析抖音视频成功: ' + (task.title || '未知标题'), 'success');
+                    } else {
+                        const error = await response.json();
+                        container.innerHTML = '<div class="empty-state"><div class="empty-icon">❌</div><div class="empty-title">解析失败</div><div class="empty-desc">' + (error.detail || '未知错误') + '</div></div>';
+                        addOperationLog('解析抖音视频失败: ' + (error.detail || '未知错误'), 'error');
                     }
-                } else {
-                    container.innerHTML = '<div class="empty-state"><div class="loading-spinner" style="width:32px;height:32px;border-width:3px;"></div><div class="empty-title">正在解析抖音视频...</div></div>';
-
-                    try {
-                        const response = await fetch('/api/tasks', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ url: actualUrl, quality: 'preview' })
-                        });
-
-                        if (response.ok) {
-                            const task = await response.json();
-                            // 检查返回的是合集还是单视频
-                            if (task.type === 'collection') {
-                                previewData = { type: 'collection', url: actualUrl, data: task };
-                                setCachedPreview(url, previewData);
-                                renderCollectionPreview(task);
-                                addOperationLog('解析抖音合集成功: ' + task.title + ' (' + (task.total_count || task.count) + '个视频)', 'success');
-                            } else {
-                                previewData = { type: 'single', url: url, data: task };
-                                setCachedPreview(url, previewData);
-                                renderSingleVideoPreview(task);
-                                addOperationLog('解析抖音视频成功: ' + (task.title || '未知标题'), 'success');
-                            }
-                        } else {
-                            const error = await response.json();
-                            container.innerHTML = '<div class="empty-state"><div class="empty-icon">❌</div><div class="empty-title">解析失败</div><div class="empty-desc">' + (error.detail || '未知错误') + '</div></div>';
-                            addOperationLog('解析抖音视频失败: ' + (error.detail || '未知错误'), 'error');
-                        }
-                    } catch (e) {
-                        container.innerHTML = '<div class="empty-state"><div class="empty-icon">❌</div><div class="empty-title">解析失败</div><div class="empty-desc">' + e.message + '</div></div>';
-                        addOperationLog('解析抖音视频失败: ' + e.message, 'error');
-                    }
+                } catch (e) {
+                    container.innerHTML = '<div class="empty-state"><div class="empty-icon">❌</div><div class="empty-title">解析失败</div><div class="empty-desc">' + e.message + '</div></div>';
+                    addOperationLog('解析抖音视频失败: ' + e.message, 'error');
                 }
             } else {
                 container.innerHTML = '<div class="empty-state"><div class="empty-icon">🔗</div><div class="empty-title">未知链接</div><div class="empty-desc">请粘贴B站或抖音链接</div></div>';

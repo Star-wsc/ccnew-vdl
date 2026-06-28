@@ -142,7 +142,7 @@ func (h *Handlers) Index(c *gin.Context) {
 func (h *Handlers) GetConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"download_dir": h.cfg.DownloadDir,
-		"version":      "v1.0.0",
+		"version":      "v1.2.0",
 		"first_run":    false,
 		"total_tasks":  len(h.mgr.GetAllTasks()),
 	})
@@ -537,27 +537,35 @@ func (h *Handlers) CreateTask(c *gin.Context) {
 
 	// 预览模式：解析视频信息并返回，不创建下载任务
 	if req.Quality == "preview" {
+		// 先判断是否为明确的合集URL（非短链接）
+		if douyin.IsDouyinCollectionURL(extractedURL) || bilibili.IsBilibiliCollectionURL(extractedURL) {
+			colInfo, colErr := h.previewCollection(extractedURL)
+			if colErr == nil {
+				c.JSON(http.StatusOK, colInfo)
+				return
+			}
+		}
+
+		// 尝试单视频解析
 		videoInfo, err := h.mgr.ParseVideo(extractedURL, "4k")
 		if err != nil {
-			// 单视频解析失败，尝试合集解析
-			colInfo, colErr := h.douyinCollection.ParseCollection(extractedURL)
+			// 短链接不回退到合集解析，直接报错
+			if strings.Contains(extractedURL, "v.douyin.com") || strings.Contains(extractedURL, "v.bilibili.com") || strings.Contains(extractedURL, "b23.tv") {
+				c.JSON(http.StatusBadRequest, gin.H{"detail": fmt.Sprintf("解析失败: %v", err)})
+				return
+			}
+			// 单视频失败，尝试合集解析作为 fallback
+			colInfo, colErr := h.previewCollection(extractedURL)
 			if colErr != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"detail": fmt.Sprintf("解析失败: %v", err)})
 				return
 			}
-			c.JSON(http.StatusOK, gin.H{
-				"type":     "collection",
-				"title":    colInfo.Title,
-				"author":   colInfo.Author,
-				"count":    colInfo.TotalCount,
-				"videos":   colInfo.Videos,
-			})
+			c.JSON(http.StatusOK, colInfo)
 			return
 		}
 		c.JSON(http.StatusOK, videoInfo)
 		return
 	}
-
 	if req.Quality == "" {
 		req.Quality = "1080p"
 	}
@@ -720,16 +728,35 @@ func (h *Handlers) PreviewCollection(c *gin.Context) {
 		return
 	}
 
-	log.Printf("[DEBUG] PreviewCollection 被调用: %s", req.URL)
+	// 从分享文本中提取URL
+	if extracted := extractFirstURL(req.URL); extracted != "" {
+		req.URL = extracted
+	}
 
 	// 根据URL判断平台
 	isDouyin := strings.Contains(req.URL, "douyin.com") || strings.Contains(req.URL, "iesdouyin.com") || strings.Contains(req.URL, "v.douyin.com")
 	isBilibili := strings.Contains(req.URL, "bilibili.com") || strings.Contains(req.URL, "b23.tv")
 
 	if isDouyin {
+		// 短链接直接走单视频解析，不尝试合集
+		if strings.Contains(req.URL, "v.douyin.com") {
+			videoInfo, vErr := h.mgr.ParseVideo(req.URL, "4k")
+			if vErr != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"detail": fmt.Sprintf("解析失败: %v", vErr)})
+				return
+			}
+			c.JSON(http.StatusOK, videoInfo)
+			return
+		}
 		info, err := h.douyinCollection.ParseCollection(req.URL)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"detail": "解析抖音合集失败: " + err.Error()})
+			// 合集解析失败，尝试单视频解析
+			videoInfo, vErr := h.mgr.ParseVideo(req.URL, "4k")
+			if vErr != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"detail": "解析失败: " + err.Error()})
+				return
+			}
+			c.JSON(http.StatusOK, videoInfo)
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{
@@ -856,6 +883,185 @@ func (h *Handlers) CreateCollection(c *gin.Context) {
 	c.JSON(http.StatusOK, col)
 }
 
+// downloadCollectionVideoFile 下载合集中单个视频的核心逻辑（提取自三个重复函数）
+func (h *Handlers) downloadCollectionVideoFile(colID string, video *CollectionVideoInfo, idx int, quality string) {
+	videoURL := video.URL
+	if videoURL == "" && video.VideoID != "" {
+		videoURL = fmt.Sprintf("https://www.douyin.com/video/%s", video.VideoID)
+	}
+	if videoURL == "" && video.BVID != "" {
+		videoURL = fmt.Sprintf("https://www.bilibili.com/video/%s", video.BVID)
+	}
+	if videoURL == "" {
+		h.collectionsMu.Lock()
+		video.Status = "failed"
+		video.ErrorMessage = "无有效URL"
+		h.collectionsMu.Unlock()
+		return
+	}
+
+	h.collectionsMu.Lock()
+	video.Status = "downloading"
+	video.Progress = 0
+	video.ErrorMessage = ""
+	h.collectionsMu.Unlock()
+
+	h.addLog("INFO", colID, fmt.Sprintf("开始下载: %s", video.Title))
+
+	// 解析视频
+	videoInfo, err := h.mgr.ParseVideo(videoURL, quality)
+	if err != nil {
+		h.collectionsMu.Lock()
+		video.Status = "failed"
+		video.ErrorMessage = err.Error()
+		h.collectionsMu.Unlock()
+		h.addLog("ERROR", colID, fmt.Sprintf("解析失败: %s - %v", video.Title, err))
+		return
+	}
+
+	h.collectionsMu.Lock()
+	if videoInfo["title"] != nil {
+		video.Title = videoInfo["title"].(string)
+	}
+	if videoInfo["author"] != nil {
+		video.Author = videoInfo["author"].(string)
+	}
+	if videoInfo["cover_url"] != nil {
+		video.CoverURL = videoInfo["cover_url"].(string)
+	}
+	h.collectionsMu.Unlock()
+
+	// 生成输出路径
+	safeTitle := sanitizeFilename(video.Title)
+	if safeTitle == "" {
+		safeTitle = fmt.Sprintf("video_%d", idx+1)
+	}
+	colFolder := sanitizeFilename(h.getCollectionTitle(colID))
+	if colFolder == "" {
+		colFolder = colID
+	}
+	colDir := filepath.Join(h.cfg.DownloadDir, colFolder)
+	os.MkdirAll(colDir, 0755)
+	outputPath := filepath.Join(colDir, safeTitle+".mp4")
+
+	// 下载
+	platform := download.IdentifyPlatform(videoURL)
+	var downloadErr error
+
+	switch platform {
+	case "bilibili":
+		parser := bilibili.NewParser()
+		if h.cfg.BilibiliCookie != "" {
+			parser.SetCookies(h.cfg.BilibiliCookie)
+		}
+		biliInfo, err := parser.Parse(videoURL, quality)
+		if err != nil {
+			downloadErr = err
+			break
+		}
+		downloader := bilibili.NewDownloader()
+		if h.cfg.BilibiliCookie != "" {
+			downloader.SetCookies(h.cfg.BilibiliCookie)
+		}
+		if biliInfo.AudioURL != "" {
+			downloadErr = downloader.DownloadWithMerge(biliInfo.VideoURL, biliInfo.AudioURL, outputPath, func(downloaded, total int64) {
+				h.collectionsMu.Lock()
+				if total > 0 {
+					video.Progress = int(downloaded * 100 / total)
+				}
+				h.collectionsMu.Unlock()
+			})
+		} else {
+			downloadErr = downloader.Download(biliInfo.VideoURL, outputPath, func(downloaded, total int64) {
+				h.collectionsMu.Lock()
+				if total > 0 {
+					video.Progress = int(downloaded * 100 / total)
+				}
+				h.collectionsMu.Unlock()
+			})
+		}
+	case "douyin":
+		douyinDl := douyin.NewDouyinDownloader(h.cfg.Proxy)
+		if h.cfg.DouyinCookie != "" {
+			douyinDl.SetCookies(h.cfg.DouyinCookie)
+		}
+		douyinInfo, err := douyinDl.Parse(videoURL)
+		if err != nil {
+			downloadErr = err
+			break
+		}
+		cookies := make(map[string]string)
+		downloadErr = douyinDl.DownloadVideo(douyinInfo.VideoURL, outputPath, cookies, func(downloaded, total int64) {
+			h.collectionsMu.Lock()
+			if total > 0 {
+				video.Progress = int(downloaded * 100 / total)
+			}
+			h.collectionsMu.Unlock()
+		})
+	default:
+		downloadErr = fmt.Errorf("不支持的平台")
+	}
+
+	h.collectionsMu.Lock()
+	if downloadErr != nil {
+		video.Status = "failed"
+		video.ErrorMessage = downloadErr.Error()
+		h.addLog("ERROR", colID, fmt.Sprintf("下载失败: %s - %v", video.Title, downloadErr))
+	} else {
+		video.Status = "completed"
+		video.Progress = 100
+		video.FilePath = outputPath
+		if info, err := os.Stat(outputPath); err == nil {
+			video.FileSize = info.Size()
+		}
+		h.addLog("INFO", colID, fmt.Sprintf("下载完成: %s", video.Title))
+	}
+	h.collectionsMu.Unlock()
+}
+
+// previewCollection 预览合集（支持B站和抖音）
+func (h *Handlers) previewCollection(url string) (gin.H, error) {
+	platform := download.IdentifyPlatform(url)
+	switch platform {
+	case "bilibili":
+		info, err := h.bilibiliCollection.ParseCollection(url)
+		if err != nil {
+			return nil, err
+		}
+		return gin.H{
+			"type":     "collection",
+			"title":    info.Title,
+			"author":   info.Author,
+			"count":    info.TotalCount,
+			"videos":   info.Videos,
+		}, nil
+	case "douyin":
+		info, err := h.douyinCollection.ParseCollection(url)
+		if err != nil {
+			return nil, err
+		}
+		return gin.H{
+			"type":     "collection",
+			"title":    info.Title,
+			"author":   info.Author,
+			"count":    info.TotalCount,
+			"videos":   info.Videos,
+		}, nil
+	default:
+		return nil, fmt.Errorf("不支持的平台")
+	}
+}
+
+// getCollectionTitle safely gets collection title by ID
+func (h *Handlers) getCollectionTitle(colID string) string {
+	h.collectionsMu.RLock()
+	defer h.collectionsMu.RUnlock()
+	if col, exists := h.collections[colID]; exists {
+		return col.Title
+	}
+	return ""
+}
+
 // downloadSelectedCollectionVideos 下载合集中选中的视频
 func (h *Handlers) downloadSelectedCollectionVideos(colID string, indices []int, quality string) {
 	h.collectionsMu.RLock()
@@ -868,159 +1074,26 @@ func (h *Handlers) downloadSelectedCollectionVideos(colID string, indices []int,
 	log.Printf("[INFO] %s: 开始下载选中视频: %s, 选中数: %d", colID, col.Title, len(indices))
 	h.addLog("INFO", colID, fmt.Sprintf("开始下载选中视频: %s, 选中数: %d", col.Title, len(indices)))
 
-	// 构建选中索引的 set
 	selectedSet := make(map[int]bool)
 	for _, idx := range indices {
 		selectedSet[idx] = true
 	}
 
-	// 使用信号量限制并发数为5
 	sem := make(chan struct{}, 5)
 	var wg sync.WaitGroup
 
 	for i, v := range col.Videos {
-		// 只下载选中的视频
-		if !selectedSet[i] {
-			continue
-		}
-		// 跳过已完成的
-		if v.Status == "completed" {
-			continue
-		}
-
-		videoURL := v.URL
-		if videoURL == "" && v.VideoID != "" {
-			videoURL = fmt.Sprintf("https://www.douyin.com/video/%s", v.VideoID)
-		}
-		if videoURL == "" && v.BVID != "" {
-			videoURL = fmt.Sprintf("https://www.bilibili.com/video/%s", v.BVID)
-		}
-		if videoURL == "" {
-			v.Status = "failed"
-			v.ErrorMessage = "无有效URL"
+		if !selectedSet[i] || v.Status == "completed" {
 			continue
 		}
 
 		wg.Add(1)
-		go func(idx int, video *CollectionVideoInfo, url string) {
+		go func(idx int, video *CollectionVideoInfo) {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-
-			h.collectionsMu.Lock()
-			video.Status = "downloading"
-			video.Progress = 0
-			h.collectionsMu.Unlock()
-
-			h.addLog("INFO", colID, fmt.Sprintf("[%d/%d] 开始下载: %s", idx+1, len(col.Videos), video.Title))
-
-			videoInfo, err := h.mgr.ParseVideo(url, quality)
-			if err != nil {
-				h.collectionsMu.Lock()
-				video.Status = "failed"
-				video.ErrorMessage = err.Error()
-				h.collectionsMu.Unlock()
-				h.addLog("ERROR", colID, fmt.Sprintf("解析失败: %s - %v", video.Title, err))
-				return
-			}
-
-			h.collectionsMu.Lock()
-			if videoInfo["title"] != nil {
-				video.Title = videoInfo["title"].(string)
-			}
-			if videoInfo["author"] != nil {
-				video.Author = videoInfo["author"].(string)
-			}
-			if videoInfo["cover_url"] != nil {
-				video.CoverURL = videoInfo["cover_url"].(string)
-			}
-			h.collectionsMu.Unlock()
-
-			safeTitle := sanitizeFilename(video.Title)
-			if safeTitle == "" {
-				safeTitle = fmt.Sprintf("video_%d", idx+1)
-			}
-			colFolder := sanitizeFilename(col.Title)
-			if colFolder == "" {
-				colFolder = colID
-			}
-			colDir := filepath.Join(h.cfg.DownloadDir, colFolder)
-			os.MkdirAll(colDir, 0755)
-			outputPath := filepath.Join(colDir, safeTitle+".mp4")
-
-			platform := identifyPlatform(url)
-			var downloadErr error
-
-			switch platform {
-			case "bilibili":
-				parser := bilibili.NewParser()
-				if h.cfg.BilibiliCookie != "" {
-					parser.SetCookies(h.cfg.BilibiliCookie)
-				}
-				biliInfo, err := parser.Parse(url, quality)
-				if err != nil {
-					downloadErr = err
-					break
-				}
-				downloader := bilibili.NewDownloader()
-				if h.cfg.BilibiliCookie != "" {
-					downloader.SetCookies(h.cfg.BilibiliCookie)
-				}
-				if biliInfo.AudioURL != "" {
-					downloadErr = downloader.DownloadWithMerge(biliInfo.VideoURL, biliInfo.AudioURL, outputPath, func(downloaded, total int64) {
-						h.collectionsMu.Lock()
-						if total > 0 {
-							video.Progress = int(downloaded * 100 / total)
-						}
-						h.collectionsMu.Unlock()
-					})
-				} else {
-					downloadErr = downloader.Download(biliInfo.VideoURL, outputPath, func(downloaded, total int64) {
-						h.collectionsMu.Lock()
-						if total > 0 {
-							video.Progress = int(downloaded * 100 / total)
-						}
-						h.collectionsMu.Unlock()
-					})
-				}
-			case "douyin":
-				douyinDl := douyin.NewDouyinDownloader(h.cfg.Proxy)
-				if h.cfg.DouyinCookie != "" {
-					douyinDl.SetCookies(h.cfg.DouyinCookie)
-				}
-				douyinInfo, err := douyinDl.Parse(url)
-				if err != nil {
-					downloadErr = err
-					break
-				}
-				cookies := make(map[string]string)
-				downloadErr = douyinDl.DownloadVideo(douyinInfo.VideoURL, outputPath, cookies, func(downloaded, total int64) {
-					h.collectionsMu.Lock()
-					if total > 0 {
-						video.Progress = int(downloaded * 100 / total)
-					}
-					h.collectionsMu.Unlock()
-				})
-			default:
-				downloadErr = fmt.Errorf("不支持的平台")
-			}
-
-			h.collectionsMu.Lock()
-			if downloadErr != nil {
-				video.Status = "failed"
-				video.ErrorMessage = downloadErr.Error()
-				h.addLog("ERROR", colID, fmt.Sprintf("下载失败: %s - %v", video.Title, downloadErr))
-			} else {
-				video.Status = "completed"
-				video.Progress = 100
-				video.FilePath = outputPath
-				if info, err := os.Stat(outputPath); err == nil {
-					video.FileSize = info.Size()
-				}
-				h.addLog("INFO", colID, fmt.Sprintf("下载完成: %s", video.Title))
-			}
-			h.collectionsMu.Unlock()
-		}(i, v, videoURL)
+			h.downloadCollectionVideoFile(colID, video, idx, quality)
+		}(i, v)
 	}
 
 	go func() {
@@ -1081,7 +1154,6 @@ func (h *Handlers) DeleteCollection(c *gin.Context) {
 	id := c.Param("id")
 	deleteFile := c.Query("deleteFile") == "true"
 
-	log.Printf("[DEBUG] DeleteCollection: id=%s, deleteFile=%v, query=%s", id, deleteFile, c.Request.URL.RawQuery)
 
 	h.collectionsMu.Lock()
 	col, exists := h.collections[id]
@@ -1093,9 +1165,7 @@ func (h *Handlers) DeleteCollection(c *gin.Context) {
 
 	// 删除文件
 	if deleteFile {
-		log.Printf("[DEBUG] DeleteCollection: 准备删除文件，共 %d 个视频", len(col.Videos))
 		for i, v := range col.Videos {
-			log.Printf("[DEBUG] DeleteCollection: 视频 %d, FilePath=%s", i, v.FilePath)
 			if v.FilePath != "" {
 				if err := os.Remove(v.FilePath); err != nil {
 					log.Printf("[WARN] 删除文件失败: %s - %v", v.FilePath, err)
@@ -1113,7 +1183,6 @@ func (h *Handlers) DeleteCollection(c *gin.Context) {
 				colFolder = id
 			}
 			colDir := filepath.Join(h.cfg.DownloadDir, colFolder)
-			log.Printf("[DEBUG] DeleteCollection: 尝试删除合集文件夹: %s", colDir)
 			os.Remove(colDir) // 只在目录为空时删除
 		}
 	}
@@ -1250,142 +1319,14 @@ func (h *Handlers) downloadSingleCollectionVideo(colID string, idx int, quality 
 		h.collectionsMu.RUnlock()
 		return
 	}
+	if idx < 0 || idx >= len(col.Videos) {
+		h.collectionsMu.RUnlock()
+		return
+	}
 	video := col.Videos[idx]
-	colTitle := col.Title
 	h.collectionsMu.RUnlock()
 
-	videoURL := video.URL
-	if videoURL == "" && video.VideoID != "" {
-		videoURL = fmt.Sprintf("https://www.douyin.com/video/%s", video.VideoID)
-	}
-	if videoURL == "" && video.BVID != "" {
-		videoURL = fmt.Sprintf("https://www.bilibili.com/video/%s", video.BVID)
-	}
-	if videoURL == "" {
-		h.collectionsMu.Lock()
-		video.Status = "failed"
-		video.ErrorMessage = "无有效URL"
-		h.collectionsMu.Unlock()
-		return
-	}
-
-	h.collectionsMu.Lock()
-	video.Status = "downloading"
-	video.Progress = 0
-	video.ErrorMessage = ""
-	h.collectionsMu.Unlock()
-
-	h.addLog("INFO", colID, fmt.Sprintf("开始下载: %s", video.Title))
-
-	// 解析视频
-	videoInfo, err := h.mgr.ParseVideo(videoURL, quality)
-	if err != nil {
-		h.collectionsMu.Lock()
-		video.Status = "failed"
-		video.ErrorMessage = err.Error()
-		h.collectionsMu.Unlock()
-		h.addLog("ERROR", colID, fmt.Sprintf("解析失败: %s - %v", video.Title, err))
-		return
-	}
-
-	h.collectionsMu.Lock()
-	if videoInfo["title"] != nil {
-		video.Title = videoInfo["title"].(string)
-	}
-	if videoInfo["author"] != nil {
-		video.Author = videoInfo["author"].(string)
-	}
-	if videoInfo["cover_url"] != nil {
-		video.CoverURL = videoInfo["cover_url"].(string)
-	}
-	h.collectionsMu.Unlock()
-
-	// 生成输出路径 - 合集子文件夹
-	safeTitle := sanitizeFilename(video.Title)
-	if safeTitle == "" {
-		safeTitle = fmt.Sprintf("video_%d", idx+1)
-	}
-	colFolder := sanitizeFilename(colTitle)
-	if colFolder == "" {
-		colFolder = colID
-	}
-	colDir := filepath.Join(h.cfg.DownloadDir, colFolder)
-	os.MkdirAll(colDir, 0755)
-	outputPath := filepath.Join(colDir, safeTitle+".mp4")
-
-	// 下载
-	platform := identifyPlatform(videoURL)
-	var downloadErr error
-
-	switch platform {
-	case "bilibili":
-		parser := bilibili.NewParser()
-		if h.cfg.BilibiliCookie != "" {
-			parser.SetCookies(h.cfg.BilibiliCookie)
-		}
-		biliInfo, err := parser.Parse(videoURL, quality)
-		if err != nil {
-			downloadErr = err
-			break
-		}
-		downloader := bilibili.NewDownloader()
-		if h.cfg.BilibiliCookie != "" {
-			downloader.SetCookies(h.cfg.BilibiliCookie)
-		}
-		if biliInfo.AudioURL != "" {
-			downloadErr = downloader.DownloadWithMerge(biliInfo.VideoURL, biliInfo.AudioURL, outputPath, func(downloaded, total int64) {
-				h.collectionsMu.Lock()
-				if total > 0 {
-					video.Progress = int(downloaded * 100 / total)
-				}
-				h.collectionsMu.Unlock()
-			})
-		} else {
-			downloadErr = downloader.Download(biliInfo.VideoURL, outputPath, func(downloaded, total int64) {
-				h.collectionsMu.Lock()
-				if total > 0 {
-					video.Progress = int(downloaded * 100 / total)
-				}
-				h.collectionsMu.Unlock()
-			})
-		}
-	case "douyin":
-		douyinDl := douyin.NewDouyinDownloader(h.cfg.Proxy)
-		if h.cfg.DouyinCookie != "" {
-			douyinDl.SetCookies(h.cfg.DouyinCookie)
-		}
-		douyinInfo, err := douyinDl.Parse(videoURL)
-		if err != nil {
-			downloadErr = err
-			break
-		}
-		cookies := make(map[string]string)
-		downloadErr = douyinDl.DownloadVideo(douyinInfo.VideoURL, outputPath, cookies, func(downloaded, total int64) {
-			h.collectionsMu.Lock()
-			if total > 0 {
-				video.Progress = int(downloaded * 100 / total)
-			}
-			h.collectionsMu.Unlock()
-		})
-	default:
-		downloadErr = fmt.Errorf("不支持的平台")
-	}
-
-	h.collectionsMu.Lock()
-	if downloadErr != nil {
-		video.Status = "failed"
-		video.ErrorMessage = downloadErr.Error()
-		h.addLog("ERROR", colID, fmt.Sprintf("下载失败: %s - %v", video.Title, downloadErr))
-	} else {
-		video.Status = "completed"
-		video.Progress = 100
-		video.FilePath = outputPath
-		if info, err := os.Stat(outputPath); err == nil {
-			video.FileSize = info.Size()
-		}
-		h.addLog("INFO", colID, fmt.Sprintf("下载完成: %s", video.Title))
-	}
-	h.collectionsMu.Unlock()
+	h.downloadCollectionVideoFile(colID, video, idx, quality)
 }
 
 func (h *Handlers) DownloadCollection(c *gin.Context) {
@@ -1422,169 +1363,30 @@ func (h *Handlers) downloadCollectionVideos(colID, quality string) {
 	h.addLog("INFO", colID, fmt.Sprintf("开始下载合集: %s, 视频数: %d", col.Title, len(col.Videos)))
 	col.Status = "downloading"
 
-	// 使用信号量限制并发数为5
 	sem := make(chan struct{}, 5)
 	var wg sync.WaitGroup
 
 	for i, v := range col.Videos {
-		// 跳过已完成的
 		if v.Status == "completed" {
 			continue
 		}
 
-		videoURL := v.URL
-		if videoURL == "" && v.VideoID != "" {
-			videoURL = fmt.Sprintf("https://www.douyin.com/video/%s", v.VideoID)
-		}
-		if videoURL == "" && v.BVID != "" {
-			videoURL = fmt.Sprintf("https://www.bilibili.com/video/%s", v.BVID)
-		}
-		if videoURL == "" {
-			h.addLog("WARNING", colID, fmt.Sprintf("视频 %d 无有效URL，跳过", i+1))
-			v.Status = "failed"
-			v.ErrorMessage = "无有效URL"
-			continue
-		}
-
 		wg.Add(1)
-		go func(idx int, video *CollectionVideoInfo, url string) {
+		go func(idx int, video *CollectionVideoInfo) {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-
-			// 更新状态为下载中
-			h.collectionsMu.Lock()
-			video.Status = "downloading"
-			video.Progress = 0
-			h.collectionsMu.Unlock()
-
-			h.addLog("INFO", colID, fmt.Sprintf("[%d/%d] 开始下载: %s", idx+1, len(col.Videos), video.Title))
-
-			// 解析视频获取下载信息
-			videoInfo, err := h.mgr.ParseVideo(url, quality)
-			if err != nil {
-				h.collectionsMu.Lock()
-				video.Status = "failed"
-				video.ErrorMessage = err.Error()
-				h.collectionsMu.Unlock()
-				h.addLog("ERROR", colID, fmt.Sprintf("解析失败: %s - %v", video.Title, err))
-				return
-			}
-
-			// 更新视频信息
-			h.collectionsMu.Lock()
-			if videoInfo["title"] != nil {
-				video.Title = videoInfo["title"].(string)
-			}
-			if videoInfo["author"] != nil {
-				video.Author = videoInfo["author"].(string)
-			}
-			if videoInfo["cover_url"] != nil {
-				video.CoverURL = videoInfo["cover_url"].(string)
-			}
-			h.collectionsMu.Unlock()
-
-			// 生成输出路径 - 合集视频下载到独立子文件夹
-			safeTitle := sanitizeFilename(video.Title)
-			if safeTitle == "" {
-				safeTitle = fmt.Sprintf("video_%d", idx+1)
-			}
-			colFolder := sanitizeFilename(col.Title)
-			if colFolder == "" {
-				colFolder = colID
-			}
-			colDir := filepath.Join(h.cfg.DownloadDir, colFolder)
-			os.MkdirAll(colDir, 0755)
-			outputPath := filepath.Join(colDir, safeTitle+".mp4")
-
-			// 调用下载（复用Manager的下载逻辑）
-			// 这里我们需要直接调用bilibili或douyin的下载器
-			platform := identifyPlatform(url)
-			var downloadErr error
-
-			switch platform {
-			case "bilibili":
-				// 获取真实的下载URL
-				parser := bilibili.NewParser()
-				if h.cfg.BilibiliCookie != "" {
-					parser.SetCookies(h.cfg.BilibiliCookie)
-				}
-				biliInfo, err := parser.Parse(url, quality)
-				if err != nil {
-					downloadErr = err
-					break
-				}
-				downloader := bilibili.NewDownloader()
-				if h.cfg.BilibiliCookie != "" {
-					downloader.SetCookies(h.cfg.BilibiliCookie)
-				}
-				if biliInfo.AudioURL != "" {
-					downloadErr = downloader.DownloadWithMerge(biliInfo.VideoURL, biliInfo.AudioURL, outputPath, func(downloaded, total int64) {
-						h.collectionsMu.Lock()
-						if total > 0 {
-							video.Progress = int(downloaded * 100 / total)
-						}
-						h.collectionsMu.Unlock()
-					})
-				} else {
-					downloadErr = downloader.Download(biliInfo.VideoURL, outputPath, func(downloaded, total int64) {
-						h.collectionsMu.Lock()
-						if total > 0 {
-							video.Progress = int(downloaded * 100 / total)
-						}
-						h.collectionsMu.Unlock()
-					})
-				}
-			case "douyin":
-				douyinDl := douyin.NewDouyinDownloader(h.cfg.Proxy)
-				if h.cfg.DouyinCookie != "" {
-					douyinDl.SetCookies(h.cfg.DouyinCookie)
-				}
-				douyinInfo, err := douyinDl.Parse(url)
-				if err != nil {
-					downloadErr = err
-					break
-				}
-				cookies := make(map[string]string)
-				downloadErr = douyinDl.DownloadVideo(douyinInfo.VideoURL, outputPath, cookies, func(downloaded, total int64) {
-					h.collectionsMu.Lock()
-					if total > 0 {
-						video.Progress = int(downloaded * 100 / total)
-					}
-					h.collectionsMu.Unlock()
-				})
-			default:
-				downloadErr = fmt.Errorf("不支持的平台")
-			}
-
-			// 更新最终状态
-			h.collectionsMu.Lock()
-			if downloadErr != nil {
-				video.Status = "failed"
-				video.ErrorMessage = downloadErr.Error()
-				h.addLog("ERROR", colID, fmt.Sprintf("下载失败: %s - %v", video.Title, downloadErr))
-			} else {
-				video.Status = "completed"
-				video.Progress = 100
-				video.FilePath = outputPath
-				if info, err := os.Stat(outputPath); err == nil {
-					video.FileSize = info.Size()
-				}
-				h.addLog("INFO", colID, fmt.Sprintf("下载完成: %s", video.Title))
-			}
-			h.collectionsMu.Unlock()
-		}(i, v, videoURL)
+			h.downloadCollectionVideoFile(colID, video, idx, quality)
+		}(i, v)
 	}
 
-	// 等待所有下载完成
 	go func() {
 		wg.Wait()
 		h.collectionsMu.Lock()
 		col.Status = "completed"
-		// 检查是否有失败的
 		for _, v := range col.Videos {
 			if v.Status == "failed" {
-				col.Status = "partial" // 部分失败
+				col.Status = "partial"
 				break
 			}
 		}
@@ -1607,10 +1409,14 @@ func (h *Handlers) SaveSettings(c *gin.Context) {
 	if req.BilibiliCookie != "" {
 		h.cfg.BilibiliCookie = req.BilibiliCookie
 		h.bilibiliParser.SetCookies(req.BilibiliCookie)
+		h.bilibiliCollection.SetCookies(req.BilibiliCookie)
+		h.mgr.SetBilibiliCookie(req.BilibiliCookie)
 	}
 	if req.DouyinCookie != "" {
 		h.cfg.DouyinCookie = req.DouyinCookie
 		h.douyinParser.SetCookies(req.DouyinCookie)
+		h.douyinCollection.SetCookies(req.DouyinCookie)
+		h.mgr.SetDouyinCookie(req.DouyinCookie)
 	}
 	h.cfg.Save()
 	c.JSON(http.StatusOK, gin.H{"message": "设置已保存"})
@@ -1727,7 +1533,7 @@ func (h *Handlers) refreshCollection(colID string) {
 
 	// 解析合集获取最新视频列表
 	var newVideos []*CollectionVideoInfo
-	platform := identifyPlatform(colURL)
+	platform := download.IdentifyPlatform(colURL)
 
 	switch platform {
 	case "bilibili":
@@ -1851,15 +1657,6 @@ func (h *Handlers) refreshCollection(colID string) {
 	}
 }
 
-func identifyPlatform(url string) string {
-	if strings.Contains(url, "bilibili.com") || strings.Contains(url, "b23.tv") {
-		return "bilibili"
-	}
-	if strings.Contains(url, "douyin.com") || strings.Contains(url, "iesdouyin.com") || strings.Contains(url, "v.douyin.com") {
-		return "douyin"
-	}
-	return ""
-}
 
 func extractFirstURL(text string) string {
 	re := regexp.MustCompile(`https?://[^\s<>"']+`)

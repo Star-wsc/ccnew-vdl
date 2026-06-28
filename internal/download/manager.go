@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"crypto/rand"
 	"os"
 	"path/filepath"
 	"sort"
@@ -150,6 +151,47 @@ func (m *Manager) CreateTask(url, quality string) *Task {
 func (m *Manager) ExecuteTask(ctx context.Context, taskID string) {
 	task := m.GetTask(taskID)
 	if task == nil {
+		return
+	}
+
+	// 如果已有预览数据（来自 create-from-preview），跳过解析直接下载
+	if task.VideoURL != "" {
+		videoInfo := &videoInfo{
+			Title:    task.Title,
+			Author:   task.Author,
+			CoverURL: task.CoverURL,
+			VideoURL: task.VideoURL,
+			Platform: task.Platform,
+			Quality:  task.Quality,
+		}
+		m.updateTaskStatus(taskID, StatusDownloading, "")
+		m.saveTasks()
+		outputPath := m.generateOutputPath(task.Title, task.Platform)
+		err := m.downloadVideo(videoInfo, outputPath, func(downloaded, total int64) {
+			m.mu.Lock()
+			if total > 0 {
+				task.Progress = int(downloaded * 100 / total)
+			} else if downloaded > 0 {
+				task.Progress = int(downloaded / (1024 * 1024))
+				if task.Progress > 99 { task.Progress = 99 }
+			}
+			task.UpdatedAt = time.Now()
+			m.mu.Unlock()
+		})
+		if err != nil {
+			m.updateTaskStatus(taskID, StatusFailed, err.Error())
+			m.saveTasks()
+			return
+		}
+		fileInfo, _ := os.Stat(outputPath)
+		m.mu.Lock()
+		task.Status = StatusCompleted
+		task.FilePath = outputPath
+		if fileInfo != nil { task.FileSize = fileInfo.Size() }
+		task.Progress = 100
+		task.UpdatedAt = time.Now()
+		m.mu.Unlock()
+		m.saveTasks()
 		return
 	}
 
@@ -476,6 +518,18 @@ func (m *Manager) generateOutputPath(title, platform string) string {
 	return filepath.Join(m.cfg.DownloadDir, prefix+safeTitle+".mp4")
 }
 
+// SetBilibiliCookie 更新Manager内部的B站Cookie
+func (m *Manager) SetBilibiliCookie(cookie string) {
+	m.bilibiliParser.SetCookies(cookie)
+	m.bilibiliDownloader.SetCookies(cookie)
+}
+
+// SetDouyinCookie 更新Manager内部的抖音Cookie
+func (m *Manager) SetDouyinCookie(cookie string) {
+	m.douyinDownloader.SetCookies(cookie)
+	m.douyinCollection.SetCookies(cookie)
+}
+
 func (m *Manager) updateTaskStatus(taskID string, status TaskStatus, errorMsg string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -515,6 +569,15 @@ func identifyPlatform(url string) string {
 	return ""
 }
 
+// IdentifyPlatform identifies platform from URL (exported for use by handlers)
+func IdentifyPlatform(url string) string {
+	return identifyPlatform(url)
+}
+
 func generateID() string {
-	return fmt.Sprintf("%d", time.Now().UnixNano())
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
