@@ -76,10 +76,16 @@ jobs:
           Copy-Item ccnew-vdl/server.exe ../server.exe
           Copy-Item -Recurse ccnew-vdl/static ../static
 
+      - name: Install NSIS
+        shell: pwsh
+        run: |
+          choco install nsis -y --no-progress
+
       - name: Build NSIS installer
-        uses: joncloud/makensis-action@v4
-        with:
-          script-file: installer.nsi
+        shell: pwsh
+        run: |
+          $env:PATH += ";C:\Program Files (x86)\NSIS"
+          makensis.exe /V2 installer.nsi
 
       - name: Upload installer
         uses: actions/upload-artifact@v4
@@ -104,6 +110,7 @@ jobs:
 
   docker:
     runs-on: ubuntu-latest
+    if: ${{ secrets.DOCKERHUB_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v4
 
