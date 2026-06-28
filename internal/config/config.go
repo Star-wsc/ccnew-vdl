@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 type Config struct {
@@ -30,10 +31,10 @@ func Load() *Config {
 		cfg.DownloadDir = dir
 	}
 	if cookie := os.Getenv("BILIBILI_COOKIE"); cookie != "" {
-		cfg.BilibiliCookie = cookie
+		cfg.BilibiliCookie = sanitizeCookie(cookie)
 	}
 	if cookie := os.Getenv("DOUYIN_COOKIE"); cookie != "" {
-		cfg.DouyinCookie = cookie
+		cfg.DouyinCookie = sanitizeCookie(cookie)
 	}
 	if proxy := os.Getenv("PROXY"); proxy != "" {
 		cfg.Proxy = proxy
@@ -66,10 +67,10 @@ func Load() *Config {
 						cfg.DownloadDir = fileCfg.DownloadDir
 					}
 					if fileCfg.BilibiliCookie != "" {
-						cfg.BilibiliCookie = fileCfg.BilibiliCookie
+						cfg.BilibiliCookie = sanitizeCookie(fileCfg.BilibiliCookie)
 					}
 					if fileCfg.DouyinCookie != "" {
-						cfg.DouyinCookie = fileCfg.DouyinCookie
+						cfg.DouyinCookie = sanitizeCookie(fileCfg.DouyinCookie)
 					}
 					if fileCfg.Proxy != "" {
 						cfg.Proxy = fileCfg.Proxy
@@ -94,6 +95,18 @@ func (c *Config) Save() error {
 		return err
 	}
 	return os.WriteFile(configFile, data, 0644)
+}
+
+// sanitizeCookie 清理Cookie中的非法HTTP头字符
+func sanitizeCookie(cookie string) string {
+	// 去除换行符、回车符、前后空白
+	cookie = strings.ReplaceAll(cookie, "\n", "")
+	cookie = strings.ReplaceAll(cookie, "\r", "")
+	cookie = strings.ReplaceAll(cookie, "\t", "")
+	cookie = strings.TrimSpace(cookie)
+	// 去除可能的引号包裹
+	cookie = strings.Trim(cookie, "\"'")
+	return cookie
 }
 
 func getDefaultDownloadDir() string {
