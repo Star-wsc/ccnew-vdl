@@ -18,14 +18,20 @@ jobs:
             goarch: amd64
             suffix: ""
             ldflags: ""
+            ffmpeg_asset: "ffmpeg-master-latest-linux64-gpl"
+            ffmpeg_bin: "ffmpeg"
           - goos: linux
             goarch: arm64
             suffix: ""
             ldflags: ""
+            ffmpeg_asset: "ffmpeg-master-latest-linuxarm64-gpl"
+            ffmpeg_bin: "ffmpeg"
           - goos: windows
             goarch: amd64
             suffix: ".exe"
             ldflags: "-H=windowsgui"
+            ffmpeg_asset: "ffmpeg-master-latest-win64-gpl"
+            ffmpeg_bin: "ffmpeg.exe"
     steps:
       - uses: actions/checkout@v4
 
@@ -40,12 +46,22 @@ jobs:
           CGO_ENABLED: '0'
         run: go build -ldflags "${{ matrix.ldflags }}" -o server${{ matrix.suffix }} ./cmd/server/
 
+      - name: Download FFmpeg
+        run: |
+          mkdir -p ffmpeg
+          wget -q "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/${{ matrix.ffmpeg_asset }}.zip" -O ffmpeg.zip
+          unzip -q ffmpeg.zip
+          cp ${{ matrix.ffmpeg_asset }}/bin/${{ matrix.ffmpeg_bin }} ffmpeg/ffmpeg${{ matrix.suffix == '.exe' && '-windows-amd64.exe' || '-linux-' + matrix.goarch }}
+          chmod +x ffmpeg/ffmpeg-* 2>/dev/null || true
+
       - name: Package
         run: |
           mkdir -p dist/ccnew-vdl
           cp server${{ matrix.suffix }} dist/ccnew-vdl/
           cp -r static dist/ccnew-vdl/
           cp -r webview2 dist/ccnew-vdl/
+          mkdir -p dist/ccnew-vdl/ffmpeg
+          cp ffmpeg/ffmpeg-* dist/ccnew-vdl/ffmpeg/
           cp start-desktop.bat dist/ccnew-vdl/ 2>/dev/null || true
           cp config.json.example dist/ccnew-vdl/ 2>/dev/null || true
           cd dist
@@ -81,6 +97,8 @@ jobs:
           Copy-Item ccnew-vdl/server.exe ../build/server.exe
           Copy-Item -Recurse ccnew-vdl/static ../build/static
           Copy-Item -Recurse ccnew-vdl/webview2 ../build/webview2
+          New-Item -ItemType Directory -Path ../build/ffmpeg -Force
+          Copy-Item ccnew-vdl/ffmpeg/ffmpeg-windows-amd64.exe ../build/ffmpeg/ffmpeg-windows-amd64.exe
 
       - name: Build Inno Setup installer
         uses: Minionguyjpro/Inno-Setup-Action@v1.2.2

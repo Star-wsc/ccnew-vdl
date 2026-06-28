@@ -48,3 +48,7 @@ ccnew-vdl-setup.exe
 
 # 构建临时目录
 build/
+
+# FFmpeg 二进制（CI 自动下载，不提交到仓库）
+ffmpeg/ffmpeg-*.exe
+ffmpeg/ffmpeg-*
