@@ -110,24 +110,40 @@ jobs:
   docker:
     runs-on: ubuntu-latest
     needs: build-binary
+    continue-on-error: true
     steps:
+      - name: Check token
+        id: check
+        run: |
+          if [ -z "${{ secrets.DOCKERHUB_TOKEN }}" ]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "DOCKERHUB_TOKEN not set, skipping Docker build"
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
       - uses: actions/checkout@v4
+        if: steps.check.outputs.skip != 'true'
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+        if: steps.check.outputs.skip != 'true'
 
       - name: Login to Docker Hub
         uses: docker/login-action@v3
+        if: steps.check.outputs.skip != 'true'
         with:
           username: wsc768043912
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Extract version from tag
         id: version
+        if: steps.check.outputs.skip != 'true'
         run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
       - name: Build and push
         uses: docker/build-push-action@v6
+        if: steps.check.outputs.skip != 'true'
         with:
           context: .
           platforms: linux/amd64,linux/arm64
