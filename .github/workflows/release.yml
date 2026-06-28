@@ -79,6 +79,17 @@ jobs:
           Copy-Item ccnew-vdl/server.exe ../server.exe
           Copy-Item -Recurse ccnew-vdl/static ../static
 
+      - name: Download WebView2 SDK
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path webview2 -Force
+          $nugetUrl = "https://www.nuget.org/api/v2/package/Microsoft.Web.WebView2"
+          Invoke-WebRequest -Uri $nugetUrl -OutFile webview2.zip
+          Expand-Archive -Path webview2.zip -DestinationPath webview2/pkg -Force
+          Copy-Item "webview2/pkg/build/native/x64/WebView2Loader.dll" webview2/
+          Copy-Item "webview2/pkg/build/native/x64/Microsoft.Web.WebView2.Core.dll" webview2/
+          Copy-Item "webview2/pkg/lib/net462/Microsoft.Web.WebView2.Wpf.dll" webview2/
+
       - name: Install NSIS
         shell: pwsh
         run: choco install nsis -y --no-progress
@@ -120,7 +131,6 @@ jobs:
         run: |
           if [ -z "${{ secrets.DOCKERHUB_TOKEN }}" ]; then
             echo "skip=true" >> $GITHUB_OUTPUT
-            echo "DOCKERHUB_TOKEN not set, skipping"
           else
             echo "skip=false" >> $GITHUB_OUTPUT
           fi
