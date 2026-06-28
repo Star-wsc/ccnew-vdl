@@ -214,7 +214,7 @@ func (h *Handlers) BrowseFolder(c *gin.Context) {
 	} else {
 		Write-Output "CANCELLED"
 	}`
-	cmd := exec.Command("powershell.exe", "-ExecutionPolicy", "Bypass", "-Command", script)
+	cmd := exec.Command("powershell.exe", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-Command", script)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"cancelled": true})
