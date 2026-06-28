@@ -1349,9 +1349,12 @@
         }
         
         .op-log-item {
-            padding: 4px 0;
+            padding: 6px 4px;
             margin-bottom: 2px;
             line-height: 1.5;
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
         }
         
         .op-log-item.success .op-log-msg { color: #4ade80; }
@@ -1361,12 +1364,15 @@
         
         .op-log-time {
             color: #6b7280;
-            margin-right: 8px;
             font-size: 11px;
+            flex-shrink: 0;
+            min-width: 60px;
         }
         
         .op-log-msg {
             color: #e5e7eb;
+            word-break: break-all;
+            min-width: 0;
         }
         
         .collection-preview {
@@ -2335,7 +2341,9 @@
         }
         
         .log-entry {
-            padding: 6px 0;
+            padding: 8px 4px;
+            align-items: flex-start;
+            line-height: 1.6;
             border-bottom: 1px solid rgba(255,255,255,0.05);
             display: flex;
             gap: 12px;
@@ -2360,12 +2368,18 @@
         .log-task {
             color: #a78bfa;
             flex-shrink: 0;
-            width: 80px;
+            min-width: 100px;
+            max-width: 160px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
         
         .log-message {
             color: #e5e7eb;
             flex: 1;
+            word-break: break-all;
+            min-width: 0;
         }
         
         .log-details {
