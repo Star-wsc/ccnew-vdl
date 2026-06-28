@@ -5,10 +5,11 @@ services:
     image: wsc768043912/ccnew-vdl:latest
     container_name: video-downloader
     ports:
-      - "18000:18000"
+      - "19000:18000"
     volumes:
-      - ./downloads:/downloads
+      - /vol1/1000/ls/TT:/downloads
       - ./config:/root/.config/ccnew-vdl
+      - ./logs:/logs
     environment:
       - PORT=18000
       - DOWNLOAD_DIR=/downloads
