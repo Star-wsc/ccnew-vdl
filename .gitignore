@@ -23,3 +23,21 @@ logs/collections.json
 # OS
 Thumbs.db
 Desktop.ini
+
+# Runtime generated files
+ccnew-vdl-window.ps1
+
+# 编译产物 (Linux)
+server-linux
+
+# 日志
+*.log
+logs/
+
+# 配置文件（含 Cookie，不应上传）
+config.json
+HANDOVER.md
+startup.log
+
+# 本地运行时生成的文件
+downloads/

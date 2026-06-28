@@ -118,4 +118,3 @@ try {
     "Error: $_" | Out-File $logFile -Append
     [System.Windows.MessageBox]::Show("启动失败: $_", 'CCNEW Video Downloader', 'OK', 'Error')
 }
-%!(EXTRA string=18000)

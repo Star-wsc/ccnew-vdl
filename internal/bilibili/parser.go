@@ -222,6 +222,24 @@ func qualityToQn(quality string) int {
 	}
 }
 
+// IsBilibiliCollectionURL checks if URL is a Bilibili collection/series URL
+func IsBilibiliCollectionURL(urlStr string) bool {
+	collectionPatterns := []string{
+		`bilibili\.com/bangumi/play/ss\d+`,
+		`bilibili\.com/bangumi/media/md\d+`,
+		`bilibili\.com/medialist/play/ml\d+`,
+		`space\.bilibili\.com/\d+/channel/collectiondetail`,
+		`space\.bilibili\.com/\d+/channel/seriesdetail`,
+		`bilibili\.com/list/\d+\?sid=\d+`,
+		`space\.bilibili\.com/\d+/lists/\d+`,
+	}
+	for _, pattern := range collectionPatterns {
+		if matched, _ := regexp.MatchString(pattern, urlStr); matched {
+			return true
+		}
+	}
+	return false
+}
 func qualityName(qn int) string {
 	switch qn {
 	case 120:

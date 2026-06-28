@@ -17,7 +17,7 @@ type Config struct {
 
 func Load() *Config {
 	cfg := &Config{
-		Port:        "19000",
+		Port:        "18000",
 		DownloadDir: getDefaultDownloadDir(),
 		LogDir:      "./logs",
 	}
