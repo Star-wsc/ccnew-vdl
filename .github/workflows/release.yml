@@ -17,14 +17,14 @@ jobs:
           - goos: linux
             goarch: amd64
             ldflags: ""
-            ffmpeg_url: "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.zip"
+            ffmpeg_url: "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz"
             ffmpeg_inner: "ffmpeg-master-latest-linux64-gpl/bin/ffmpeg"
             ffmpeg_name: "ffmpeg-linux-amd64"
             suffix: ""
           - goos: linux
             goarch: arm64
             ldflags: ""
-            ffmpeg_url: "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linuxarm64-gpl.zip"
+            ffmpeg_url: "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linuxarm64-gpl.tar.xz"
             ffmpeg_inner: "ffmpeg-master-latest-linuxarm64-gpl/bin/ffmpeg"
             ffmpeg_name: "ffmpeg-linux-arm64"
             suffix: ""
@@ -52,11 +52,15 @@ jobs:
       - name: Download FFmpeg
         run: |
           mkdir -p ffmpeg
-          wget -q "${{ matrix.ffmpeg_url }}" -O ffmpeg.zip
-          unzip -q ffmpeg.zip
+          wget -q "${{ matrix.ffmpeg_url }}" -O ffmpeg-archive
+          if [[ "${{ matrix.ffmpeg_url }}" == *.tar.xz ]]; then
+            tar xf ffmpeg-archive
+          else
+            unzip -q ffmpeg-archive
+          fi
           cp ${{ matrix.ffmpeg_inner }} ffmpeg/${{ matrix.ffmpeg_name }}
           chmod +x ffmpeg/${{ matrix.ffmpeg_name }} 2>/dev/null || true
-          rm -rf ffmpeg.zip ffmpeg-master-*
+          rm -rf ffmpeg-archive ffmpeg-master-*
 
       - name: Package
         run: |
