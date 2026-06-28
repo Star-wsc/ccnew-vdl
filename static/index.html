@@ -4768,6 +4768,10 @@
             try {
                 const response = await fetch('/api/config');
                 const config = await response.json();
+                if (config.platform && config.platform !== 'windows') {
+                    const scanBtn = document.getElementById('scanLoginBtn');
+                    if (scanBtn) scanBtn.style.display = 'none';
+                }
                 appVersion = config.version || 'v0.4.0';
                 const versionElement = document.getElementById('versionInfo');
                 if (versionElement) {
@@ -5016,7 +5020,7 @@
                             <div style="display: flex; gap: 8px;">
                                 <button class="modal-btn" style="background: var(--primary); color: white; border: none;" onclick="saveBilibiliCookie()">保存Cookie</button>
                                 <button class="modal-btn" onclick="clearBilibiliCookie()">清除Cookie</button>
-                                <button class="modal-btn" style="background: var(--success); color: white; border: none;" onclick="loginBilibili()">扫码登录</button>
+                                <button class="modal-btn" id="scanLoginBtn" style="background: var(--success); color: white; border: none;" onclick="loginBilibili()">扫码登录</button>
                             </div>
                             <p style="font-size: 12px; color: var(--gray-500); margin-top: 8px;">
                                 获取方法：登录B站 → F12打开开发者工具 → Network → 刷新页面 → 点击任意请求 → Headers → 复制Cookie值

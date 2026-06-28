@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -142,9 +143,10 @@ func (h *Handlers) Index(c *gin.Context) {
 func (h *Handlers) GetConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"download_dir": h.cfg.DownloadDir,
-		"version":      "v1.2.1",
+		"version":      "v1.3.0",
 		"first_run":    false,
 		"total_tasks":  len(h.mgr.GetAllTasks()),
+		"platform":     runtime.GOOS,
 	})
 }
 
