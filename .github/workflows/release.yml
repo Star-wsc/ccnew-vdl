@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  build-binary:
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -43,6 +43,7 @@ jobs:
           cp server${{ matrix.suffix }} dist/ccnew-vdl/
           cp -r static dist/ccnew-vdl/
           cp start-desktop.bat dist/ccnew-vdl/ 2>/dev/null || true
+          cp config.json.example dist/ccnew-vdl/ 2>/dev/null || true
           cd dist
           if [ "${{ matrix.goos }}" = "windows" ]; then
             zip -r ccnew-vdl-${{ matrix.goos }}-${{ matrix.goarch }}.zip ccnew-vdl/
@@ -56,8 +57,38 @@ jobs:
           name: ccnew-vdl-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/ccnew-vdl-*
 
+  build-installer:
+    runs-on: windows-latest
+    needs: build-binary
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ccnew-vdl-windows-amd64
+          path: build/
+
+      - name: Extract and prepare
+        shell: pwsh
+        run: |
+          cd build
+          Expand-Archive -Path ccnew-vdl-windows-amd64.zip -DestinationPath .
+          Copy-Item ccnew-vdl/server.exe ../server.exe
+          Copy-Item -Recurse ccnew-vdl/static ../static
+
+      - name: Build NSIS installer
+        uses: joncloud/makensis-action@v4
+        with:
+          script-file: installer.nsi
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: ccnew-vdl-setup
+          path: ccnew-vdl-setup.exe
+
   release:
-    needs: build
+    needs: [build-binary, build-installer]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -70,3 +101,31 @@ jobs:
         with:
           files: artifacts/*
           generate_release_notes: true
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            wsc768043912/ccnew-vdl:latest
+            wsc768043912/ccnew-vdl:${{ steps.version.outputs.VERSION }}

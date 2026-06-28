@@ -142,7 +142,7 @@ func (h *Handlers) Index(c *gin.Context) {
 func (h *Handlers) GetConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"download_dir": h.cfg.DownloadDir,
-		"version":      "v1.2.0",
+		"version":      "v1.2.1",
 		"first_run":    false,
 		"total_tasks":  len(h.mgr.GetAllTasks()),
 	})

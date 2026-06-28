@@ -4772,6 +4772,7 @@
                 if (config.first_run) {
                     showFirstRunModal();
                 }
+                checkForUpdate(appVersion);
             } catch (e) {
                 console.error('Failed to load config:', e);
             }
@@ -5798,6 +5799,21 @@
                 document.execCommand('copy');
                 document.body.removeChild(textarea);
             });
+        }
+
+        async function checkForUpdate(currentVersion) {
+            try {
+                const resp = await fetch("https://api.github.com/repos/Star-wsc/ccnew-vdl/releases/latest");
+                if (!resp.ok) return;
+                const release = await resp.json();
+                const latestTag = release.tag_name;
+                if (!latestTag || latestTag === currentVersion) return;
+                const downloadUrl = release.html_url;
+                const banner = document.createElement("div");
+                banner.style.cssText = "position:fixed;bottom:20px;right:20px;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:white;padding:16px 24px;border-radius:12px;z-index:99999;box-shadow:0 8px 32px rgba(99,102,241,0.4);max-width:360px;font-size:14px;";
+                banner.innerHTML = `<div style="font-weight:700;margin-bottom:6px;">发现新版本 ${latestTag}</div><div style="opacity:0.9;margin-bottom:12px;">当前 ${currentVersion}</div><div style="display:flex;gap:8px;"><a href="${downloadUrl}" target="_blank" style="flex:1;text-align:center;background:white;color:#6366f1;padding:8px 16px;border-radius:8px;text-decoration:none;font-weight:600;">去下载</a><button onclick="this.parentElement.parentElement.remove()" style="background:rgba(255,255,255,0.2);border:none;color:white;padding:8px 16px;border-radius:8px;cursor:pointer;">稍后</button></div>`;
+                document.body.appendChild(banner);
+            } catch (e) {}
         }
 </script>
 </body>
