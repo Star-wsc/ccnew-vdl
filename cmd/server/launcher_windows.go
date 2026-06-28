@@ -1,3 +1,5 @@
+//go:build windows
+
 package main
 
 import (
@@ -189,7 +191,7 @@ try {
     "Error: $_" | Out-File $logFile -Append
     [System.Windows.MessageBox]::Show("启动失败: $_", 'CCNEW Video Downloader', 'OK', 'Error')
 }
-`, exeDir, coreDll, wpfdll, port, port)
+`, exeDir, coreDll, wpfdll, port)
 
 	// Write with UTF-8 BOM for Chinese character support
 	bom := []byte{0xEF, 0xBB, 0xBF}
