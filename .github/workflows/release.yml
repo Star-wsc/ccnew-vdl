@@ -78,8 +78,7 @@ jobs:
 
       - name: Install NSIS
         shell: pwsh
-        run: |
-          choco install nsis -y --no-progress
+        run: choco install nsis -y --no-progress
 
       - name: Build NSIS installer
         shell: pwsh
@@ -110,7 +109,7 @@ jobs:
 
   docker:
     runs-on: ubuntu-latest
-    if: ${{ secrets.DOCKERHUB_TOKEN != '' }}
+    needs: build-binary
     steps:
       - uses: actions/checkout@v4
 
@@ -120,7 +119,7 @@ jobs:
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          username: wsc768043912
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Extract version from tag
