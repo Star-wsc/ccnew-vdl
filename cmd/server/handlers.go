@@ -486,6 +486,14 @@ func (h *Handlers) GetStats(c *gin.Context) {
 	}
 	h.collectionsMu.RUnlock()
 
+	// 计算全局下载速度
+	var globalSpeed int64
+	for _, t := range tasks {
+		if t.Status == StatusDownloading {
+			globalSpeed += t.Speed
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"total":                total + collectionsTotal,
 		"pending":              pending,
@@ -498,6 +506,7 @@ func (h *Handlers) GetStats(c *gin.Context) {
 		"collections_downloading": collectionsDownloading,
 		"collections_completed":   collectionsCompleted,
 		"collections_failed":      collectionsFailed,
+		"global_speed":         globalSpeed,
 	})
 }
 

@@ -1591,6 +1591,8 @@
         .status-pending { background: #fef3c7; color: #92400e; }
         .status-downloading { background: #d1fae5; color: #065f46; }
         .status-completed { background: var(--success); color: white; }
+        .status-subscribed { background: #8b5cf6; color: white; }
+        
         .status-failed { background: #fee2e2; color: #991b1b; }
         
         .task-title {
@@ -3391,6 +3393,7 @@
                 <span class="version-info" id="versionInfo">版本 v0.4.0</span>
             </div>
             <div class="header-actions">
+                <span id="headerSpeed" style="display:inline-flex;align-items:center;gap:5px;font-size:13px;color:var(--text-secondary,#6b7280);padding:6px 12px;border:1px solid var(--border-color,#e5e7eb);border-radius:8px;background:var(--bg-card,white);">⚡ <span id="globalSpeedValue">0 B/s</span></span>
                 <button class="header-btn" onclick="showSystemLogs()">系统日志</button>
                 <button class="header-btn primary" onclick="showSettings()">设置</button>
                 <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="切换深色模式">🌙</button>
@@ -3701,6 +3704,7 @@
                 document.getElementById('statFailed').textContent = stats.failed;
                 document.getElementById('statSingleTotal').textContent = stats.single_total || 0;
                 document.getElementById('statCollections').textContent = stats.collections_total || 0;
+                document.getElementById('globalSpeedValue').textContent = stats.global_speed > 0 ? formatSpeed(stats.global_speed) : '0 B/s';
             } catch (e) {
                 console.error('Load stats error:', e);
             }
@@ -4580,7 +4584,7 @@
                 <div class="task-item ${selectedCollectionId === col.id ? 'active' : ''}" onclick="selectCollection('${col.id}')">
                     <div class="task-header">
                         <span class="task-id"><span class="platform-badge ${getPlatformClass(col.url)}">${getPlatformName(col.url)}</span>#${col.id}</span>
-                        <span class="task-status status-${col.status}">${getStatusText(col.status)}</span>
+                        <span class="task-status ${col.subscribed && col.status === 'completed' ? 'status-subscribed' : 'status-' + col.status}">${(col.subscribed && col.status === 'completed') ? '订阅中' : getStatusText(col.status)}</span>
                     </div>
                     <div class="task-title">${col.title || '未知合集'}</div>
                     <div class="task-author">${col.author || '未知作者'} · ${completedVideos}/${totalVideos} 个视频</div>
@@ -5228,6 +5232,7 @@
         
         async function autoPreview(url) {
             const container = document.getElementById('previewContainer');
+            let actualUrl = url;
 
             // 清除选中的任务，防止定时刷新覆盖新URL的预览
             selectedTaskId = null;
@@ -5642,6 +5647,7 @@
         loadHistory();
         refreshInterval = setInterval(loadTasks, 2000);
         setInterval(loadHistory, 5000);
+        setInterval(loadCollections, 3000);
         renderOperationLogs();
         initMobileLayout();
         

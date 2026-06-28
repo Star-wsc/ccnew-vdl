@@ -39,7 +39,7 @@ func killPortProcess(port string) {
 
 func main() {
 	// 立即隐藏控制台窗口（在任何输出之前）
-	// hideConsoleWindow() // 调试时注释掉，可以看到日志
+	hideConsoleWindow()
 
 	cfg := config.Load()
 

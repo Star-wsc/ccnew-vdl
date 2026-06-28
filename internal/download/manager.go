@@ -38,6 +38,7 @@ type Task struct {
 	Platform     string     `json:"platform"`
 	Status       TaskStatus `json:"status"`
 	Progress     int        `json:"progress"`
+	Speed        int64      `json:"speed"`
 	FilePath     string     `json:"file_path"`
 	FileSize     int64      `json:"file_size"`
 	ErrorMessage string     `json:"error_message"`
@@ -167,6 +168,8 @@ func (m *Manager) ExecuteTask(ctx context.Context, taskID string) {
 		m.updateTaskStatus(taskID, StatusDownloading, "")
 		m.saveTasks()
 		outputPath := m.generateOutputPath(task.Title, task.Platform)
+		var lastDL int64
+		var lastTS = time.Now()
 		err := m.downloadVideo(videoInfo, outputPath, func(downloaded, total int64) {
 			m.mu.Lock()
 			if total > 0 {
@@ -175,7 +178,14 @@ func (m *Manager) ExecuteTask(ctx context.Context, taskID string) {
 				task.Progress = int(downloaded / (1024 * 1024))
 				if task.Progress > 99 { task.Progress = 99 }
 			}
-			task.UpdatedAt = time.Now()
+			now := time.Now()
+			dt := now.Sub(lastTS).Seconds()
+			if dt >= 0.5 {
+				task.Speed = int64(float64(downloaded - lastDL) / dt)
+				lastDL = downloaded
+				lastTS = now
+			}
+			task.UpdatedAt = now
 			m.mu.Unlock()
 		})
 		if err != nil {
@@ -189,6 +199,7 @@ func (m *Manager) ExecuteTask(ctx context.Context, taskID string) {
 		task.FilePath = outputPath
 		if fileInfo != nil { task.FileSize = fileInfo.Size() }
 		task.Progress = 100
+		task.Speed = 0
 		task.UpdatedAt = time.Now()
 		m.mu.Unlock()
 		m.saveTasks()
@@ -222,18 +233,26 @@ func (m *Manager) ExecuteTask(ctx context.Context, taskID string) {
 	m.saveTasks()
 
 	outputPath := m.generateOutputPath(task.Title, task.Platform)
+	var lastDL2 int64
+	var lastTS2 = time.Now()
 	err = m.downloadVideo(videoInfo, outputPath, func(downloaded, total int64) {
 		m.mu.Lock()
 		if total > 0 {
 			task.Progress = int(downloaded * 100 / total)
 		} else if downloaded > 0 {
-			// 未知总大小时，每下载1MB显示进度
 			task.Progress = int(downloaded / (1024 * 1024))
 			if task.Progress > 99 {
 				task.Progress = 99
 			}
 		}
-		task.UpdatedAt = time.Now()
+		now := time.Now()
+		dt := now.Sub(lastTS2).Seconds()
+		if dt >= 0.5 {
+			task.Speed = int64(float64(downloaded - lastDL2) / dt)
+			lastDL2 = downloaded
+			lastTS2 = now
+		}
+		task.UpdatedAt = now
 		m.mu.Unlock()
 	})
 
@@ -252,6 +271,7 @@ func (m *Manager) ExecuteTask(ctx context.Context, taskID string) {
 		task.FileSize = fileInfo.Size()
 	}
 	task.Progress = 100
+	task.Speed = 0
 	task.UpdatedAt = time.Now()
 	m.mu.Unlock()
 

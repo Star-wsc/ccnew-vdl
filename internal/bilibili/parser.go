@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -34,6 +35,8 @@ type VideoInfo struct {
 	CoverURL  string
 	VideoURL  string
 	AudioURL  string
+	VideoURLs []string
+	AudioURLs []string
 	Quality   string
 	Duration  int
 }
@@ -49,13 +52,15 @@ func (p *Parser) Parse(url string, quality string) (*VideoInfo, error) {
 		return nil, fmt.Errorf("获取视频信息失败: %w", err)
 	}
 
-	videoURL, audioURL, actualQn, err := p.getVideoURLs(info.AID, info.CID, quality)
+	videoURL, audioURL, videoURLs, audioURLs, actualQn, err := p.getVideoURLs(info.AID, info.CID, quality)
 	if err != nil {
 		return nil, fmt.Errorf("获取视频流失败: %w", err)
 	}
 
 	info.VideoURL = videoURL
 	info.AudioURL = audioURL
+	info.VideoURLs = videoURLs
+	info.AudioURLs = audioURLs
 	info.Quality = qualityName(actualQn)
 	return info, nil
 }
@@ -120,59 +125,63 @@ func (p *Parser) getVideoInfo(bvid string) (*VideoInfo, error) {
 	}, nil
 }
 
-func (p *Parser) getVideoURLs(aid, cid int64, quality string) (videoURL, audioURL string, actualQn int, err error) {
+func (p *Parser) getVideoURLs(aid, cid int64, quality string) (videoURL, audioURL string, videoURLs, audioURLs []string, actualQn int, err error) {
 	qn := qualityToQn(quality)
 	apiURL := fmt.Sprintf("https://api.bilibili.com/x/player/playurl?avid=%d&cid=%d&qn=%d&fnval=16&fourk=1", aid, cid, qn)
 
 	req, err := http.NewRequest("GET", apiURL, nil)
 	if err != nil {
-		return "", "", 0, err
+		return "", "", nil, nil, 0, err
 	}
 
 	p.setHeaders(req)
 	resp, err := p.client.Do(req)
 	if err != nil {
-		return "", "", 0, err
+		return "", "", nil, nil, 0, err
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", "", 0, err
+		return "", "", nil, nil, 0, err
 	}
 
 	var result struct {
 		Code int `json:"code"`
 		Data struct {
 			Durl []struct {
-				URL string `json:"url"`
+				URL       string   `json:"url"`
+				BackupURL []string `json:"backup_url"`
 			} `json:"durl"`
 			Dash struct {
 				Video []struct {
-					ID   int    `json:"id"`
-					BaseURL string `json:"baseUrl"`
+					ID        int      `json:"id"`
+					BaseURL   string   `json:"baseUrl"`
+					BackupURL []string `json:"backup_url"`
 				} `json:"video"`
 				Audio []struct {
-					BaseURL string `json:"baseUrl"`
+					BaseURL   string   `json:"baseUrl"`
+					BackupURL []string `json:"backup_url"`
 				} `json:"audio"`
 			} `json:"dash"`
 		} `json:"data"`
 	}
 
 	if err := json.Unmarshal(body, &result); err != nil {
-		return "", "", 0, err
+		return "", "", nil, nil, 0, err
 	}
 
 	if result.Code != 0 {
-		return "", "", 0, fmt.Errorf("playurl API错误: %d", result.Code)
+		return "", "", nil, nil, 0, fmt.Errorf("playurl API错误: %d", result.Code)
 	}
 
 	// DASH格式
 	if len(result.Data.Dash.Video) > 0 {
 		// 选择最高画质（遍历所有流，取 ID 最大的）
 		var selectedVideo struct {
-			ID   int    `json:"id"`
-			BaseURL string `json:"baseUrl"`
+			ID        int      `json:"id"`
+			BaseURL   string   `json:"baseUrl"`
+			BackupURL []string `json:"backup_url"`
 		}
 		for _, v := range result.Data.Dash.Video {
 			if v.ID > selectedVideo.ID {
@@ -185,17 +194,27 @@ func (p *Parser) getVideoURLs(aid, cid int64, quality string) (videoURL, audioUR
 		}
 
 		if len(result.Data.Dash.Audio) > 0 {
-			return selectedVideo.BaseURL, result.Data.Dash.Audio[0].BaseURL, selectedVideo.ID, nil
+			videoURLs = append([]string{selectedVideo.BaseURL}, selectedVideo.BackupURL...)
+		videoURLs = append(videoURLs, cdnFallbackURLs(selectedVideo.BaseURL)...)
+		audio := result.Data.Dash.Audio[0]
+		audioURLs = append([]string{audio.BaseURL}, audio.BackupURL...)
+		audioURLs = append(audioURLs, cdnFallbackURLs(audio.BaseURL)...)
+		return selectedVideo.BaseURL, audio.BaseURL, uniqueStrings(videoURLs), uniqueStrings(audioURLs), selectedVideo.ID, nil
 		}
-		return selectedVideo.BaseURL, "", selectedVideo.ID, nil
+		videoURLs = append([]string{selectedVideo.BaseURL}, selectedVideo.BackupURL...)
+		videoURLs = append(videoURLs, cdnFallbackURLs(selectedVideo.BaseURL)...)
+		return selectedVideo.BaseURL, "", uniqueStrings(videoURLs), nil, selectedVideo.ID, nil
 	}
 
 	// Durl格式
 	if len(result.Data.Durl) > 0 {
-		return result.Data.Durl[0].URL, "", qn, nil
+		d := result.Data.Durl[0]
+		candidates := append([]string{d.URL}, d.BackupURL...)
+		candidates = append(candidates, cdnFallbackURLs(d.URL)...)
+		return d.URL, "", uniqueStrings(candidates), nil, qn, nil
 	}
 
-	return "", "", 0, fmt.Errorf("未找到视频流")
+	return "", "", nil, nil, 0, fmt.Errorf("未找到视频流")
 }
 
 func (p *Parser) setHeaders(req *http.Request) {
@@ -239,6 +258,55 @@ func IsBilibiliCollectionURL(urlStr string) bool {
 		}
 	}
 	return false
+}
+
+
+// cdnFallbackURLs 根据原始URL生成备用CDN主机候选
+func cdnFallbackURLs(rawURL string) []string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return nil
+	}
+	host := u.Hostname()
+	port := u.Port()
+
+	// 对于bilivideo.cn的CDN节点，尝试替换主机名和端口
+	if strings.HasSuffix(host, ".bilivideo.cn") || strings.HasSuffix(host, ".bilivideo.com") {
+		var candidates []string
+		// 尝试不带端口的443
+		if port != "" && port != "443" {
+			u2 := *u
+			u2.Host = host + ":443"
+			candidates = append(candidates, u2.String())
+		}
+		// 尝试不带端口
+		u3 := *u
+		u3.Host = host
+		candidates = append(candidates, u3.String())
+		// 尝试通用CDN主机
+		for _, mirror := range []string{"upos-sz-mirrorcos.bilivideo.cn", "upos-sz-mirrorhw.bilivideo.cn", "cn-ksh-cu-v-04.bilivideo.cn"} {
+			if host != mirror {
+				u4 := *u
+				u4.Host = mirror
+				candidates = append(candidates, u4.String())
+			}
+		}
+		return candidates
+	}
+	return nil
+}
+
+// uniqueStrings 去重并保持顺序
+func uniqueStrings(items []string) []string {
+	seen := make(map[string]bool)
+	var result []string
+	for _, s := range items {
+		if s != "" && !seen[s] {
+			seen[s] = true
+			result = append(result, s)
+		}
+	}
+	return result
 }
 func qualityName(qn int) string {
 	switch qn {

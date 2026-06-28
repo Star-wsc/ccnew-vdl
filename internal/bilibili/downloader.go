@@ -3,6 +3,7 @@ package bilibili
 import (
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -146,14 +147,34 @@ func (d *Downloader) DownloadWithMerge(videoURL, audioURL, outputPath string, pr
 	defer os.Remove(videoTemp)
 	defer os.Remove(audioTemp)
 
-	// 下载视频流（进度0-100%）
-	if err := d.Download(videoURL, videoTemp, progressFunc); err != nil {
-		return fmt.Errorf("下载视频流失败: %w", err)
+	// 下载视频流（带重试）
+	var videoErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			time.Sleep(time.Duration(attempt*2) * time.Second)
+		}
+		videoErr = d.Download(videoURL, videoTemp, progressFunc)
+		if videoErr == nil {
+			break
+		}
+	}
+	if videoErr != nil {
+		return fmt.Errorf("下载视频流失败(重试3次): %w", videoErr)
 	}
 
-	// 下载音频流（进度0-100%）
-	if err := d.Download(audioURL, audioTemp, progressFunc); err != nil {
-		return fmt.Errorf("下载音频流失败: %w", err)
+	// 下载音频流（带重试）
+	var audioErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			time.Sleep(time.Duration(attempt*2) * time.Second)
+		}
+		audioErr = d.Download(audioURL, audioTemp, progressFunc)
+		if audioErr == nil {
+			break
+		}
+	}
+	if audioErr != nil {
+		return fmt.Errorf("下载音频流失败(重试3次): %w", audioErr)
 	}
 
 	// 清理M4S头部
@@ -172,6 +193,82 @@ func (d *Downloader) DownloadWithMerge(videoURL, audioURL, outputPath string, pr
 
 	// 合并音视频
 	return MergeMP4(videoClean, audioClean, outputPath)
+}
+
+// DownloadWithMergeURLs 使用候选URL列表下载DASH格式视频并合并
+func (d *Downloader) DownloadWithMergeURLs(videoURLs, audioURLs []string, outputPath string, progressFunc func(int64, int64)) error {
+	if len(videoURLs) == 0 {
+		return fmt.Errorf("没有可用的视频流URL")
+	}
+	if len(audioURLs) == 0 {
+		// 非DASH格式，只下载视频
+		return d.Download(videoURLs[0], outputPath, progressFunc)
+	}
+
+	// 生成临时文件名
+	videoTemp := fmt.Sprintf("temp_video_%d.m4s", time.Now().UnixNano())
+	audioTemp := fmt.Sprintf("temp_audio_%d.m4s", time.Now().UnixNano())
+	defer os.Remove(videoTemp)
+	defer os.Remove(audioTemp)
+
+	// 下载视频流（带重试和CDN切换）
+	videoErr := d.downloadStreamWithFallback(videoURLs, videoTemp, "视频", progressFunc)
+	if videoErr != nil {
+		return fmt.Errorf("下载视频流失败: %w", videoErr)
+	}
+
+	// 下载音频流（带重试和CDN切换）
+	audioErr := d.downloadStreamWithFallback(audioURLs, audioTemp, "音频", progressFunc)
+	if audioErr != nil {
+		return fmt.Errorf("下载音频流失败: %w", audioErr)
+	}
+
+	// 清理M4S头部
+	videoClean := videoTemp + ".clean.mp4"
+	audioClean := audioTemp + ".clean.m4a"
+	defer os.Remove(videoClean)
+	defer os.Remove(audioClean)
+
+	if err := removeM4SHeader(videoTemp, videoClean); err != nil {
+		return fmt.Errorf("清理视频M4S头部失败: %w", err)
+	}
+
+	if err := removeM4SHeader(audioTemp, audioClean); err != nil {
+		return fmt.Errorf("清理音频M4S头部失败: %w", err)
+	}
+
+	// 合并音视频
+	return MergeMP4(videoClean, audioClean, outputPath)
+}
+
+// downloadStreamWithFallback 使用候选URL列表下载流，支持重试和CDN切换
+func (d *Downloader) downloadStreamWithFallback(candidates []string, outputPath string, streamType string, progressFunc func(int64, int64)) error {
+	if len(candidates) == 0 {
+		return fmt.Errorf("没有可用的%s流URL", streamType)
+	}
+
+	for i, candidateURL := range candidates {
+		for attempt := 0; attempt < 3; attempt++ {
+			if attempt > 0 || i > 0 {
+				time.Sleep(time.Duration(attempt+1) * time.Second)
+			}
+			err := d.Download(candidateURL, outputPath, progressFunc)
+			if err == nil {
+				return nil
+			}
+			// 如果是连接拒绝错误，切换到下一个候选URL
+			if strings.Contains(err.Error(), "connectex") || strings.Contains(err.Error(), "connection refused") || strings.Contains(err.Error(), "actively refused") {
+				if i < len(candidates)-1 {
+					log.Printf("[B站-CDN] %s流当前节点失败(%v)，切换到备用节点", streamType, err)
+					break // 跳出重试循环，尝试下一个候选URL
+				}
+			}
+			if attempt == 2 && i == len(candidates)-1 {
+				return fmt.Errorf("下载%s流失败(所有候选节点均失败): %w", streamType, err)
+			}
+		}
+	}
+	return fmt.Errorf("下载%s流失败: 所有候选URL均不可用", streamType)
 }
 
 // removeM4SHeader 剥离B站M4S文件的8字节私有头部
