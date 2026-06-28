@@ -45,3 +45,6 @@ downloads/
 ccnew-vdl-setup.exe
 
 
+
+# 构建临时目录
+build/

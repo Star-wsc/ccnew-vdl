@@ -70,26 +70,23 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: ccnew-vdl-windows-amd64
-          path: build/
+          path: dist/
 
-      - name: Extract and prepare
+      - name: Prepare build directory
         shell: pwsh
         run: |
-          cd build
+          New-Item -ItemType Directory -Path build -Force
+          cd dist
           Expand-Archive -Path ccnew-vdl-windows-amd64.zip -DestinationPath .
-          Copy-Item ccnew-vdl/server.exe ../server.exe
-          Copy-Item -Recurse ccnew-vdl/static ../static
-          Copy-Item -Recurse ccnew-vdl/webview2 ../webview2
+          Copy-Item ccnew-vdl/server.exe ../build/server.exe
+          Copy-Item -Recurse ccnew-vdl/static ../build/static
+          Copy-Item -Recurse ccnew-vdl/webview2 ../build/webview2
 
-      - name: Install NSIS
-        shell: pwsh
-        run: choco install nsis -y --no-progress
-
-      - name: Build NSIS installer
-        shell: pwsh
-        run: |
-          $env:PATH += ";C:\Program Files (x86)\NSIS"
-          makensis.exe /V2 installer.nsi
+      - name: Build Inno Setup installer
+        uses: Minionguyjpro/Inno-Setup-Action@v1.2.2
+        with:
+          path: installer.iss
+          options: /O"."
 
       - name: Upload installer
         uses: actions/upload-artifact@v4
