@@ -1,0 +1,7 @@
+{
+  "port": "18000",
+  "download_dir": "./downloads",
+  "bilibili_cookie": "",
+  "douyin_cookie": "",
+  "proxy": ""
+}
