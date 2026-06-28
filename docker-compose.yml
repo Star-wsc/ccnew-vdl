@@ -2,21 +2,18 @@ version: '3.8'
 
 services:
   video-downloader:
-    build: .
+    image: wsc768043912/ccnew-vdl:latest
     container_name: video-downloader
     ports:
       - "18000:18000"
     volumes:
       - ./downloads:/downloads
-      - ./logs:/logs
+      - ./config:/root/.config/ccnew-vdl
     environment:
       - PORT=18000
       - DOWNLOAD_DIR=/downloads
-      - LOG_DIR=/logs
       # B站Cookie（可选，用于4K下载）
       # - BILIBILI_COOKIE=your_cookie_here
       # 抖音Cookie（可选）
       # - DOUYIN_COOKIE=your_cookie_here
-      # 代理设置（可选）
-      # - PROXY=http://proxy:8080
     restart: unless-stopped
