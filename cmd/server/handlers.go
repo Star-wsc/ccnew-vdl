@@ -206,13 +206,31 @@ func (h *Handlers) SetDownloadDir(c *gin.Context) {
 func (h *Handlers) BrowseFolder(c *gin.Context) {
 	script := `
 	Add-Type -AssemblyName System.Windows.Forms
+	Add-Type -AssemblyName System.Drawing
+
+	# 创建隐藏的 TopMost 窗口作为对话框 Owner，强制置顶
+	$form = New-Object System.Windows.Forms.Form
+	$form.StartPosition = [System.Windows.Forms.FormStartPosition]::Manual
+	$form.Location = New-Object System.Drawing.Point(-10000, -10000)
+	$form.Size = New-Object System.Drawing.Size(1, 1)
+	$form.TopMost = $true
+	$form.ShowInTaskbar = $false
+	$form.Opacity = 0
+	$form.Show()
+	$form.BringToFront()
+
 	$dialog = New-Object System.Windows.Forms.FolderBrowserDialog
 	$dialog.Description = "选择下载目录"
 	$dialog.ShowNewFolderButton = $true
-	if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
-		Write-Output $dialog.SelectedPath
+	[void]$dialog.ShowDialog($form)
+
+	$form.Close()
+	$form.Dispose()
+
+	if ($dialog.SelectedPath) {
+	    Write-Output $dialog.SelectedPath
 	} else {
-		Write-Output "CANCELLED"
+	    Write-Output "CANCELLED"
 	}`
 	cmd := exec.Command("powershell.exe", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-Command", script)
 	output, err := cmd.CombinedOutput()
