@@ -70,20 +70,20 @@ func (p *Parser) Parse(rawURL string) (*models.VideoInfo, error) {
 		log.Printf("[抖音] 无法提取视频ID，使用原始URL: %s", videoURL)
 	}
 
-	info, err := p.parseRenderData(fullURL)
+	info, err := p.parseDetailAPI(videoID)
 	if err == nil && info.VideoURL != "" {
-		log.Printf("[抖音] 策略1(parseRenderData)成功")
+		log.Printf("[抖音] 策略1(parseDetailAPI+ttwid)成功")
 		return info, nil
 	} else {
-		log.Printf("[抖音] 策略1(parseRenderData)失败: %v", err)
+		log.Printf("[抖音] 策略1(parseDetailAPI+ttwid)失败: %v", err)
 	}
 
-	info, err = p.parseDetailAPI(videoID)
+	info, err = p.parseRenderData(fullURL)
 	if err == nil && info.VideoURL != "" {
-		log.Printf("[抖音] 策略2(parseDetailAPI)成功")
+		log.Printf("[抖音] 策略2(parseRenderData)成功")
 		return info, nil
 	} else {
-		log.Printf("[抖音] 策略2(parseDetailAPI)失败: %v", err)
+		log.Printf("[抖音] 策略2(parseRenderData)失败: %v", err)
 	}
 
 	info, err = p.parseHTMLRegex(fullURL)
@@ -483,6 +483,31 @@ func mapQualityAdvanced(gearName string, qualityType float64, width, height int)
 	return ""
 }
 
+
+// getTtwid 从字节跳动获取ttwid cookie（Detail API必需）
+func (p *Parser) getTtwid() string {
+	body := `{"region":"cn","aid":1768,"needFid":false,"service":"www.ixigua.com","migrate_priority":0,"cbUrlProtocol":"https","union":true}`
+	req, err := http.NewRequest("POST", "https://ttwid.bytedance.com/ttwid/union/register/", strings.NewReader(body))
+	if err != nil {
+		return ""
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+
+	for _, cookie := range resp.Cookies() {
+		if cookie.Name == "ttwid" {
+			return cookie.Value
+		}
+	}
+	return ""
+}
 // ============ Strategy 2: Detail API ============
 
 func (p *Parser) parseDetailAPI(videoID string) (*models.VideoInfo, error) {
@@ -501,9 +526,16 @@ func (p *Parser) parseDetailAPI(videoID string) (*models.VideoInfo, error) {
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9")
 
-	// 添加Cookie支持
-	if p.cookies != "" {
-		req.Header.Set("Cookie", p.cookies)
+	// 添加Cookie支持（优先使用用户Cookie，否则自动获取ttwid）
+	cookieStr := p.cookies
+	if cookieStr == "" {
+		ttwid := p.getTtwid()
+		if ttwid != "" {
+			cookieStr = "ttwid=" + ttwid
+		}
+	}
+	if cookieStr != "" {
+		req.Header.Set("Cookie", cookieStr)
 	}
 
 	resp, err := p.client.Do(req)
