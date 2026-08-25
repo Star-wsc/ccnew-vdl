@@ -143,7 +143,7 @@ func (h *Handlers) Index(c *gin.Context) {
 func (h *Handlers) GetConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"download_dir": h.cfg.DownloadDir,
-		"version":      "v1.3.0",
+		"version":      "v1.3.1",
 		"first_run":    false,
 		"total_tasks":  len(h.mgr.GetAllTasks()),
 		"platform":     runtime.GOOS,
@@ -1731,4 +1731,90 @@ func (h *Handlers) loadCollections() error {
 	defer h.collectionsMu.Unlock()
 
 	return json.Unmarshal(data, &h.collections)
+}
+// ==================== Auto Update ====================
+
+func (h *Handlers) TriggerUpdate(c *gin.Context) {
+	if runtime.GOOS != "windows" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "自动更新仅支持Windows"})
+		return
+	}
+
+	// 获取最新release的setup.exe下载链接
+	resp, err := http.Get("https://api.github.com/repos/Star-wsc/ccnew-vdl/releases/latest")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "无法获取版本信息"})
+		return
+	}
+	defer resp.Body.Close()
+
+	var release struct {
+		TagName string `json:"tag_name"`
+		Assets  []struct {
+			Name               string `json:"name"`
+			BrowserDownloadURL string `json:"browser_download_url"`
+		} `json:"assets"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "解析版本信息失败"})
+		return
+	}
+
+	var setupURL string
+	for _, asset := range release.Assets {
+		if asset.Name == "ccnew-vdl-setup.exe" {
+			setupURL = asset.BrowserDownloadURL
+			break
+		}
+	}
+
+	if setupURL == "" {
+		c.JSON(http.StatusNotFound, gin.H{"error": "未找到安装包"})
+		return
+	}
+
+	// 下载安装包到临时目录
+	tmpDir := os.TempDir()
+	setupPath := filepath.Join(tmpDir, "ccnew-vdl-setup.exe")
+
+	dlResp, err := http.Get(setupURL)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("下载安装包失败: %v", err)})
+		return
+	}
+	defer dlResp.Body.Close()
+
+	outFile, err := os.Create(setupPath)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "创建临时文件失败"})
+		return
+	}
+	written, err := io.Copy(outFile, dlResp.Body)
+	outFile.Close()
+	if err != nil {
+		os.Remove(setupPath)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "下载安装包失败"})
+		return
+	}
+	if written < 1024 {
+		os.Remove(setupPath)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "安装包文件异常"})
+		return
+	}
+
+	// 启动安装程序（静默安装模式）
+	cmd := exec.Command(setupPath, "/SILENT", "/NORESTART")
+	if err := cmd.Start(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("启动安装程序失败: %v", err)})
+		return
+	}
+
+	// 安装程序启动后，延迟退出当前程序
+	go func() {
+		time.Sleep(3 * time.Second)
+		os.Exit(0)
+	}()
+
+	c.JSON(http.StatusOK, gin.H{"message": "正在下载并安装更新，程序即将重启..."})
 }

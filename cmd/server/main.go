@@ -88,6 +88,7 @@ func main() {
 	r.DELETE("/api/logs", h.ClearLogs)
 	r.POST("/api/settings", h.SaveSettings)
 	r.GET("/api/console/visible", h.GetConsoleVisible)
+	r.POST("/api/update", h.TriggerUpdate)
 	r.POST("/api/console/toggle", h.ToggleConsoleWindow)
 
 	r.POST("/api/collections/preview", h.PreviewCollection)
