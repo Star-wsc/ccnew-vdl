@@ -15,7 +15,8 @@ RUN go mod download
 COPY . .
 
 # 编译
-RUN CGO_ENABLED=0 GOOS=linux go build -o server ./cmd/server/
+ARG VERSION=v1.3.2
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags "-X main.Version=${VERSION}" -o server ./cmd/server/
 
 # 运行阶段
 FROM alpine:latest

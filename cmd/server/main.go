@@ -18,6 +18,9 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// Version is set at build time via ldflags
+var Version = "dev"
+
 func killPortProcess(port string) {
 	cmd := exec.Command("cmd", "/c", fmt.Sprintf("netstat -ano | findstr :%s | findstr LISTENING", port))
 	output, _ := cmd.Output()

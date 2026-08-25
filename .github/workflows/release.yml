@@ -41,7 +41,7 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: '0'
-        run: go build -ldflags "${{ matrix.ldflags }}" -o server${{ matrix.suffix }} ./cmd/server/
+        run: go build -ldflags "${{ matrix.ldflags }} -X main.Version=${{ github.ref_name }}" -o server${{ matrix.suffix }} ./cmd/server/
 
       - name: Package
         run: |
@@ -155,6 +155,8 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
+          build-args: |
+            VERSION=${{ steps.version.outputs.VERSION }}
           tags: |
             wsc768043912/ccnew-vdl:latest
             wsc768043912/ccnew-vdl:${{ steps.version.outputs.VERSION }}
