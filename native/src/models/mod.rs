@@ -30,6 +30,8 @@ pub struct DownloadTask {
     pub status: TaskStatus, pub progress: i32, pub speed: i64,
     pub file_path: String, pub file_size: i64, pub error_message: String,
     pub created_at: String, pub updated_at: String,
+    #[serde(default)] pub downloaded_bytes: u64,
+    #[serde(default)] pub selected: bool,
 }
 impl DownloadTask {
     pub fn new(url: &str, quality: &str) -> Self {
@@ -51,7 +53,7 @@ pub struct CollectionVideoInfo {
     pub url: String, pub title: String, pub author: String, pub cover_url: String,
     pub duration: i32, pub page: i32,
 }
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CreateTaskRequest { pub url: String, pub quality: String }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateCollectionRequest {

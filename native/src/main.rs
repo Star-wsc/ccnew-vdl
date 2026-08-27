@@ -1,58 +1,98 @@
-use ccnew_native::download::DownloadManager;
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 use ccnew_native::config::AppConfig;
-use ccnew_native::models::TaskStatus;
+use ccnew_native::download::DownloadManager;
+use ccnew_native::server::{AppState, build_router};
 use std::sync::Arc;
 use tracing::info;
 
-slint::include_modules!();
+fn main() -> anyhow::Result<()> {
+    // Tokio runtime
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
+    let _guard = rt.enter();
 
-fn fmt_speed(bps: u64) -> String {
-    if bps == 0 { return String::new(); }
-    let units = ["B/s","KB/s","MB/s","GB/s"];
-    let (mut v, mut i) = (bps as f64, 0);
-    while v >= 1024.0 && i < 3 { v /= 1024.0; i += 1; }
-    if v >= 100.0 { format!("{:.0} {}", v, units[i]) } else { format!("{:.1} {}", v, units[i]) }
-}
+    // 日志
+    let log_dir = dirs::data_local_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("CCNEW-VideoDownloader-Native")
+        .join("logs");
+    let _ = std::fs::create_dir_all(&log_dir);
+    let log_file = std::fs::OpenOptions::new()
+        .create(true).append(true)
+        .open(log_dir.join("app.log")).ok();
+    if let Some(f) = log_file {
+        tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::INFO)
+            .with_writer(std::sync::Mutex::new(f))
+            .init();
+    } else {
+        tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::INFO)
+            .init();
+    }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt().with_max_level(tracing::Level::INFO).init();
-    let config = AppConfig::load()?;
+    let config = rt.block_on(async { AppConfig::load() })?;
     info!("CCNEW Native v{} 启动", env!("CARGO_PKG_VERSION"));
-    let mgr = Arc::new(DownloadManager::new(config).await?);
-    let app = AppWindow::new()?;
 
-    app.on_parse_clicked({ let m = mgr.clone(); move |url| {
-        let url = url.to_string(); if url.is_empty() { return; }
-        let m = m.clone();
-        tokio::spawn(async move { let t = m.create_task(&url, "auto").await; m.execute_task(&t.id).await.ok(); });
-    }});
+    let mgr = Arc::new(rt.block_on(DownloadManager::new(config))?);
 
-    app.on_url_submitted({ let m = mgr.clone(); move |url| {
-        let url = url.to_string(); if url.is_empty() { return; }
-        let m = m.clone();
-        tokio::spawn(async move { let t = m.create_task(&url, "auto").await; m.execute_task(&t.id).await.ok(); });
-    }});
+    // 内嵌 HTTP 服务器 - 绑定随机端口
+    let state = AppState {
+        mgr: mgr.clone(),
+        logs: Arc::new(tokio::sync::RwLock::new(Vec::new())),
+        collections: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+    };
+    let app = build_router(state);
+    let port = find_free_port()?;
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+    info!("HTTP 服务器启动于 http://127.0.0.1:{}", port);
 
-    let mp = mgr.clone();
-    let weak = app.as_weak();
-    let timer = slint::Timer::default();
-    timer.start(slint::TimerMode::Repeated, std::time::Duration::from_secs(2), move || {
-        let Some(app) = weak.upgrade() else { return };
-        let rt = tokio::runtime::Handle::current();
-        let tasks = rt.block_on(mp.get_all_tasks());
-        let (mut dl, mut done, mut fail) = (0i32, 0i32, 0i32);
-        let items: Vec<TaskData> = tasks.iter().map(|t| {
-            match t.status { TaskStatus::Downloading => dl+=1, TaskStatus::Completed => done+=1, TaskStatus::Failed => fail+=1, _=>{} }
-            TaskData { id: t.id.clone().into(), title: t.title.clone().into(), author: t.author.clone().into(),
-                platform: t.platform.clone().into(),
-                status: match &t.status { TaskStatus::Pending=>"pending",TaskStatus::Parsing=>"parsing",TaskStatus::Downloading=>"downloading",TaskStatus::Completed=>"completed",TaskStatus::Failed=>"failed" }.into(),
-                speed: fmt_speed(t.speed as u64).into(), progress: t.progress as f32 }
-        }).collect();
-        app.set_tasks(std::rc::Rc::new(slint::VecModel::from(items)).into());
-        app.set_downloading_count(dl); app.set_completed_count(done); app.set_failed_count(fail);
-        app.set_status_text(format!("就绪 · {} 个任务", tasks.len()).into());
+    rt.spawn(async move {
+        let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+        axum::serve(listener, app).await.unwrap();
     });
 
-    app.run()?; Ok(())
+    // 等待服务器就绪
+    std::thread::sleep(std::time::Duration::from_millis(200));
+
+    // 创建原生窗口 + WebView
+    let url = format!("http://127.0.0.1:{}", port);
+    create_window(&url)?;
+
+    Ok(())
+}
+
+fn find_free_port() -> anyhow::Result<u16> {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
+    Ok(listener.local_addr()?.port())
+}
+
+fn create_window(url: &str) -> anyhow::Result<()> {
+    use tao::event::{Event, StartCause, WindowEvent};
+    use tao::event_loop::{ControlFlow, EventLoopBuilder};
+    use tao::window::WindowBuilder;
+    use wry::WebViewBuilder;
+
+    let event_loop = EventLoopBuilder::new().build();
+    let window = WindowBuilder::new()
+        .with_title("CCNEW 视频下载器 · Native v1.3.4")
+        .with_inner_size(tao::dpi::LogicalSize::new(1100.0, 720.0))
+        .with_min_inner_size(tao::dpi::LogicalSize::new(800.0, 500.0))
+        .build(&event_loop)?;
+
+    let _webview = WebViewBuilder::new()
+        .with_url(url)
+        .build(&window)?;
+
+    event_loop.run(move |event, _, control_flow| {
+        *control_flow = ControlFlow::Wait;
+        match event {
+            Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => {
+                *control_flow = ControlFlow::Exit;
+            }
+            _ => {}
+        }
+    });
 }
