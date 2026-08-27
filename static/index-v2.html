@@ -250,7 +250,7 @@ input[type=text]:focus,textarea:focus{border-color:rgba(0,255,163,.55);box-shado
     <button class="tab" data-v="logs">日志流</button>
     <button class="tab" data-v="sets">系统配置</button>
   </nav>
-  <button id="classicBtn" onclick="goClassic()" title="切换到旧版界面">&lt; 旧版界面</button>
+  
 </header>
 
 <main>
@@ -348,7 +348,6 @@ function ftm(ts){try{return new Date(ts).toLocaleTimeString("zh-CN",{hour12:fals
 function pimg(u){return u?"/api/proxy/image?url="+encodeURIComponent(u):""}
 function plat(p){return p==="bilibili"?'<span class="plat bilibili">B</span>':p==="douyin"?'<span class="plat douyin">D</span>':""}
 function spill(s){return'<span class="pill '+esc(s)+'">'+({pending:"待命",parsing:"解析中",downloading:"下载中",completed:"已完成",failed:"失败",partial:"部分完成"}[s]||esc(s))+"</span>"}
-function goClassic(){location.href="/static/index.html?t="+Date.now()}
 
 /* ===== 状态 ===== */
 let CUR="deck",TASKS=[],COLS=[],LOGS=[],PV=null,Q="4k",SEL=new Set(),ct=null;
