@@ -18,6 +18,15 @@ var (
 	procCreateMutex  = kernel32.NewProc("CreateMutexW")
 	childPSPid       int
 )
+// silentCmd 创建一个不会弹出窗口的命令
+func silentCmd(name string, args ...string) *exec.Cmd {
+	cmd := exec.Command(name, args...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		HideWindow:    true,
+		CreationFlags: 0x08000000, // CREATE_NO_WINDOW
+	}
+	return cmd
+}
 
 // acquireSingleInstance 尝试获取全局互斥锁，返回 false 表示已有实例在跑
 func acquireSingleInstance() bool {
@@ -26,11 +35,15 @@ func acquireSingleInstance() bool {
 	if handle == 0 {
 		return true // 创建失败，放行
 	}
-	if err != nil && err.Error() == "The operation completed successfully." {
+	// CreateMutex 成功时 GetLastError 返回 0 (ERROR_SUCCESS)，Go 中 err 为 nil
+	// 如果互斥锁已存在，GetLastError 返回 ERROR_ALREADY_EXISTS (183)
+	if err == nil {
 		return true // 新建成功，唯一实例
 	}
-	// ERROR_ALREADY_EXISTS = 183
-	return false
+	if errno, ok := err.(syscall.Errno); ok && errno == 183 {
+		return false // 已有实例在跑
+	}
+	return true // 其他错误，放行
 }
 
 // cleanupOrphans 杀掉残留的 WebView2 和由本项目启动的 PowerShell 进程
@@ -38,7 +51,7 @@ func cleanupOrphans() {
 	selfPID := os.Getpid()
 
 	// 杀掉残留 PowerShell（窗口标题含 CCNEW 或命令行含 ccnew-vdl-window）
-	if out, err := exec.Command("tasklist", "/FI", "IMAGENAME eq powershell.exe", "/FO", "CSV", "/NH").Output(); err == nil {
+	if out, err := silentCmd("tasklist", "/FI", "IMAGENAME eq powershell.exe", "/FO", "CSV", "/NH").Output(); err == nil {
 		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 			cols := strings.Split(strings.TrimSpace(line), ",")
 			if len(cols) < 2 { continue }
@@ -47,24 +60,26 @@ func cleanupOrphans() {
 			// 不杀自己
 			if pid == fmt.Sprint(selfPID) { continue }
 			// 检查命令行
-			cmdOut, _ := exec.Command("wmic", "process", "where", fmt.Sprintf("ProcessId=%s", pid), "get", "CommandLine", "/FORMAT:VALUE").Output()
+			cmdOut, _ := silentCmd("wmic", "process", "where", fmt.Sprintf("ProcessId=%s", pid), "get", "CommandLine", "/FORMAT:VALUE").Output()
 			if strings.Contains(strings.ToLower(string(cmdOut)), "ccnew-vdl") {
 				log.Printf("[清理] 杀掉残留PowerShell PID=%s", pid)
-				exec.Command("taskkill", "/F", "/PID", pid).Run()
+				silentCmd("taskkill", "/F", "/PID", pid).Run()
 			}
 		}
 	}
 
-	// 杀掉残留 WebView2（属于本项目临时目录的）
-	if out, err := exec.Command("tasklist", "/FI", "IMAGENAME eq msedgewebview2.exe", "/FO", "CSV", "/NH").Output(); err == nil {
-		lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-		if len(lines) > 0 {
-			log.Printf("[清理] 发现 %d 个 WebView2 进程，尝试清理", len(lines))
-			for _, line := range lines {
-				cols := strings.Split(strings.TrimSpace(line), ",")
-				if len(cols) < 2 { continue }
-				pid := strings.Trim(cols[1], "\"")
-				exec.Command("taskkill", "/F", "/PID", pid).Run()
+	// 杀掉残留 WebView2（只清理本项目临时目录的，不误杀其他应用）
+	wv2TmpDir := strings.ToLower(filepath.Join(os.TempDir(), "ccnew-vdl-wv2"))
+	if out, err := silentCmd("tasklist", "/FI", "IMAGENAME eq msedgewebview2.exe", "/FO", "CSV", "/NH").Output(); err == nil {
+		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			cols := strings.Split(strings.TrimSpace(line), ",")
+			if len(cols) < 2 { continue }
+			pid := strings.Trim(cols[1], "\"")
+			if pid == "" { continue }
+			cmdOut, _ := silentCmd("wmic", "process", "where", fmt.Sprintf("ProcessId=%s", pid), "get", "CommandLine", "/FORMAT:VALUE").Output()
+			if strings.Contains(strings.ToLower(string(cmdOut)), wv2TmpDir) {
+				log.Printf("[清理] 杀掉残留WebView2 PID=%s", pid)
+				silentCmd("taskkill", "/F", "/PID", pid).Run()
 			}
 		}
 	}
@@ -74,10 +89,10 @@ func cleanupOrphans() {
 func killChildProcess() {
 	if childPSPid > 0 {
 		log.Printf("[退出] 杀掉前端窗口 PID=%d", childPSPid)
-		exec.Command("taskkill", "/F", "/T", "/PID", fmt.Sprint(childPSPid)).Run()
+		silentCmd("taskkill", "/F", "/T", "/PID", fmt.Sprint(childPSPid)).Run()
 	}
 	// 也清理可能残留的 WebView2
-	exec.Command("taskkill", "/F", "/IM", "msedgewebview2.exe").Run()
+	silentCmd("taskkill", "/F", "/IM", "msedgewebview2.exe").Run()
 }
 
 func launchDesktopWindow(port string, quit chan os.Signal) {
@@ -136,7 +151,7 @@ func launchDesktopWindow(port string, quit chan os.Signal) {
 
 func showError(msg string) {
 	log.Printf("错误: %s", msg)
-	exec.Command("powershell", "-Command", fmt.Sprintf(
+	silentCmd("powershell", "-Command", fmt.Sprintf(
 		"Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.MessageBox]::Show('%s', 'CCNEW Video Downloader', 'OK', 'Error')",
 		msg)).Run()
 }
