@@ -1,6 +1,8 @@
 #define MyAppName "CCNEW Video Downloader"
 #define MyAppNameCN "抖音B站视频解析工具"
-#define MyAppVersion "1.2.7"
+#ifndef MyAppVersion
+#define MyAppVersion "1.3.4"
+#endif
 #define MyAppPublisher "Star-wsc"
 #define MyAppExeName "CCNEW-VideoDownloader.exe"
 

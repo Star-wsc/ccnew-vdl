@@ -41,11 +41,11 @@ docker-compose up -d
 ### 桌面版
 
 ```bash
-# 编译
-go build -o desktop ./cmd/desktop/
+# 编译（与服务器版同一入口）
+go build -ldflags "-H=windowsgui" -o server.exe ./cmd/server/
 
-# 运行
-./desktop
+# 运行（自动拉起 WebView2 桌面窗口，需 webview2/ 目录）
+./start-desktop.bat
 ```
 
 ## 配置
@@ -85,14 +85,15 @@ B站4K视频使用DASH格式，音视频分离。下载流程：
 
 ## API接口
 
-### 解析链接
+### 预览链接（不创建任务，返回单视频或合集信息）
 
 ```http
-POST /api/parse
+POST /api/tasks
 Content-Type: application/json
 
 {
-  "url": "https://www.bilibili.com/video/BV1xx411c7mD"
+  "url": "https://www.bilibili.com/video/BV1xx411c7mD",
+  "quality": "preview"
 }
 ```
 

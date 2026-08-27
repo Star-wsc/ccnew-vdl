@@ -19,24 +19,68 @@ import (
 )
 
 // Version is set at build time via ldflags
-var Version = "dev"
+var Version = "1.3.4"
 
+// killPortProcess 仅强杀同名的自身旧实例，避免误伤占用端口的其他程序。
 func killPortProcess(port string) {
 	cmd := exec.Command("cmd", "/c", fmt.Sprintf("netstat -ano | findstr :%s | findstr LISTENING", port))
 	output, _ := cmd.Output()
 	if len(output) == 0 {
 		return
 	}
-	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-	for _, line := range lines {
+
+	selfName := ""
+	if exe, err := os.Executable(); err == nil {
+		selfName = strings.ToLower(filepath.Base(exe))
+	}
+
+	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
 		fields := strings.Fields(strings.TrimSpace(line))
-		if len(fields) >= 5 {
-			pid := fields[len(fields)-1]
-			if pid != "0" {
-				log.Printf("杀掉占用端口%s的进程: PID=%s", port, pid)
-				exec.Command("taskkill", "/F", "/PID", pid).Run()
+		if len(fields) < 5 {
+			continue
+		}
+		pid := fields[len(fields)-1]
+		if pid == "0" {
+			continue
+		}
+
+		imgOut, err := exec.Command("tasklist", "/FI", fmt.Sprintf("PID eq %s", pid), "/FO", "CSV", "/NH").Output()
+		if err != nil || len(imgOut) == 0 {
+			continue
+		}
+		cols := strings.Split(strings.TrimSpace(string(imgOut)), ",")
+		if len(cols) < 1 {
+			continue
+		}
+		name := strings.Trim(strings.ToLower(cols[0]), "\"")
+		if selfName == "" || !strings.EqualFold(name, selfName) {
+			log.Printf("端口 %s 被 %s(PID=%s) 占用且非本程序实例，跳过强杀", port, name, pid)
+			continue
+		}
+		log.Printf("杀掉占用端口%s的旧实例: PID=%s", port, pid)
+		exec.Command("taskkill", "/F", "/PID", pid).Run()
+	}
+}
+
+// cleanupStaleTempFiles 清理上次运行残留的临时分片（崩溃/断电遗留）。
+func cleanupStaleTempFiles() {
+	patterns := []string{
+		"temp_video_*.m4s",
+		"temp_audio_*.m4s",
+		"temp_video_*.m4s.clean.mp4",
+		"temp_audio_*.m4s.clean.m4a",
+	}
+	removed := 0
+	for _, p := range patterns {
+		matches, _ := filepath.Glob(p)
+		for _, f := range matches {
+			if os.Remove(f) == nil {
+				removed++
 			}
 		}
+	}
+	if removed > 0 {
+		log.Printf("清理了 %d 个上次运行残留的临时文件", removed)
 	}
 }
 
@@ -44,7 +88,17 @@ func main() {
 	// 立即隐藏控制台窗口（在任何输出之前）
 	hideConsoleWindow()
 
+	cleanupStaleTempFiles()
+
 	cfg := config.Load()
+
+	// 初始化文件日志
+	os.MkdirAll(cfg.LogDir, 0755)
+	if logFile, logErr := os.OpenFile(filepath.Join(cfg.LogDir, "server.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); logErr == nil {
+		log.SetOutput(logFile)
+		log.Printf("[启动] 日志文件: %s", logFile.Name())
+		defer logFile.Close()
+	}
 
 	os.MkdirAll(cfg.DownloadDir, 0755)
 	os.MkdirAll(cfg.LogDir, 0755)
@@ -64,7 +118,7 @@ func main() {
 	r := gin.New()
 	r.Use(gin.Logger())
 	r.Use(gin.Recovery())
-	r.Use(corsMiddleware())
+	r.Use(corsMiddleware(cfg.Port))
 
 	// 所有 API 路由
 	r.GET("/", h.Index)
@@ -146,32 +200,28 @@ func main() {
 	<-quit
 
 	log.Println("正在关闭服务器...")
+	killChildProcess() // 清理前端窗口和WebView2
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	srv.Shutdown(ctx)
 	log.Println("服务器已关闭")
 }
 
-func corsMiddleware() gin.HandlerFunc {
+// corsMiddleware 仅对本机来源（含端口）放行 CORS，拒绝前缀伪装域名。
+func corsMiddleware(port string) gin.HandlerFunc {
+	allowed := map[string]bool{
+		"http://127.0.0.1:" + port: true,
+		"http://localhost:" + port: true,
+	}
+
 	return func(c *gin.Context) {
 		origin := c.Request.Header.Get("Origin")
-		allowedOrigins := []string{"http://127.0.0.1", "http://localhost", "http://0.0.0.0"}
-		allowed := false
-		for _, ao := range allowedOrigins {
-			if strings.HasPrefix(origin, ao) {
-				allowed = true
-				break
-			}
-		}
-		if origin == "" {
-			allowed = true
-		}
-		if allowed {
+		if origin != "" && allowed[origin] {
 			c.Writer.Header().Set("Access-Control-Allow-Origin", origin)
+			c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+			c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
 		}
-		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(204)
 			return

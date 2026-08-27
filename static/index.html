@@ -3408,6 +3408,7 @@
             </div>
             <div class="header-actions">
                 <span id="headerSpeed" style="display:inline-flex;align-items:center;gap:5px;font-size:13px;color:var(--text-secondary,#6b7280);padding:6px 12px;border:1px solid var(--border-color,#e5e7eb);border-radius:8px;background:var(--bg-card,white);">⚡ <span id="globalSpeedValue">0 B/s</span></span>
+                <button class="header-btn" onclick="switchToV2()" title="切换到新版界面(默认)" style="background:#00e5a0;border-color:#00e5a0;color:#04150d;font-weight:600">✦ 新版界面</button>
                 <button class="header-btn" onclick="showSystemLogs()">系统日志</button>
                 <button class="header-btn primary" onclick="showSettings()">设置</button>
                 <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="切换深色模式">🌙</button>
@@ -5841,4 +5842,7 @@
         }
 </script>
 </body>
+<script>
+function switchToV2(){location.href='/?t='+Date.now()}
+</script>
 </html>

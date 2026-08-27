@@ -54,6 +54,7 @@ func (d *DouyinDownloader) Parse(rawURL string) (*models.VideoInfo, error) {
 	log.Printf("[抖音] 策略1: iesdouyin分享页+移动端UA: %s", shareURL)
 	info, err := d.parseWithMobileUA(shareURL)
 	if err == nil && info.VideoURL != "" {
+		d.enrichAudioURL(info, videoID)
 		log.Printf("[抖音] 策略1成功: title=%s, author=%s", info.Title, info.Author)
 		return info, nil
 	}
@@ -64,6 +65,7 @@ func (d *DouyinDownloader) Parse(rawURL string) (*models.VideoInfo, error) {
 	log.Printf("[抖音] 策略2: douyin.com+移动端UA")
 	info, err = d.parseWithMobileUA(douyinURL)
 	if err == nil && info.VideoURL != "" {
+		d.enrichAudioURL(info, videoID)
 		log.Printf("[抖音] 策略2成功")
 		return info, nil
 	}
@@ -73,6 +75,7 @@ func (d *DouyinDownloader) Parse(rawURL string) (*models.VideoInfo, error) {
 	log.Printf("[抖音] 策略3: 桌面UA快速解析")
 	info, err = d.parser.Parse(douyinURL)
 	if err == nil && info.VideoURL != "" {
+		d.enrichAudioURL(info, videoID)
 		log.Printf("[抖音] 策略3成功")
 		return info, nil
 	}
@@ -82,6 +85,7 @@ func (d *DouyinDownloader) Parse(rawURL string) (*models.VideoInfo, error) {
 	log.Printf("[抖音] 策略4: 多UA尝试")
 	info, err = d.parseWithAlternateUA(shareURL)
 	if err == nil && info.VideoURL != "" {
+		d.enrichAudioURL(info, videoID)
 		log.Printf("[抖音] 策略4成功")
 		return info, nil
 	}
@@ -91,6 +95,7 @@ func (d *DouyinDownloader) Parse(rawURL string) (*models.VideoInfo, error) {
 	log.Printf("[抖音] 策略5: 第三方API")
 	info, err = d.parseViaAPI(douyinURL)
 	if err == nil && info.VideoURL != "" {
+		d.enrichAudioURL(info, videoID)
 		log.Printf("[抖音] 策略5成功")
 		return info, nil
 	}
@@ -460,4 +465,14 @@ func (d *DouyinDownloader) DownloadVideo(videoURL, outputPath string, cookies ma
 	}
 
 	return nil
+}
+
+// enrichAudioURL 从API补充音频流URL（抖音DASH格式音视频分离）
+func (d *DouyinDownloader) enrichAudioURL(info *models.VideoInfo, videoID string) {
+	if info.AudioURL != "" { return }
+	apiInfo, err := d.parser.parseDetailAPI(videoID)
+	if err == nil && apiInfo != nil && apiInfo.AudioURL != "" {
+		info.AudioURL = apiInfo.AudioURL
+		log.Printf("[抖音-enrich] 已补充音频流URL")
+	}
 }

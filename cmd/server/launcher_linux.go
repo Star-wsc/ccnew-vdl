@@ -20,3 +20,7 @@ func launchDesktopWindow(port string, quit chan os.Signal) {
 func showError(msg string) {
 	log.Printf("错误: %s", msg)
 }
+
+func killChildProcess() {}
+
+func acquireSingleInstance() bool { return true }

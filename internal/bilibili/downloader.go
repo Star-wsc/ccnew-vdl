@@ -63,7 +63,7 @@ func (d *Downloader) Download(url, outputPath string, progressFunc func(int64, i
 		// 读取前100字节检查是否是HTML
 		buf := make([]byte, 100)
 		n, _ := io.ReadFull(resp.Body, buf)
-		if n > 0 && (string(buf[:n]) == "<!DOCTYPE" || string(buf[:n])[:5] == "<html") {
+		if n > 0 && (strings.HasPrefix(string(buf[:n]), "<!DOCTYPE") || strings.HasPrefix(string(buf[:n]), "<html")) {
 			return fmt.Errorf("服务器返回HTML而非视频流")
 		}
 		// 如果不是HTML，继续下载（需要把已读取的部分写入）

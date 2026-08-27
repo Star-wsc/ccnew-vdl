@@ -92,13 +92,21 @@ jobs:
         uses: Minionguyjpro/Inno-Setup-Action@v1.2.2
         with:
           path: installer.iss
-          options: /O"."
+          options: /O"." /DMyAppVersion=${{ github.ref_name }}
+
+      - name: Generate SHA256 checksum
+        shell: pwsh
+        run: |
+          $h = (Get-FileHash 'ccnew-vdl-setup.exe' -Algorithm SHA256).Hash.ToLower()
+          "$h  ccnew-vdl-setup.exe" | Out-File -Encoding ascii 'ccnew-vdl-setup.exe.sha256'
 
       - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
           name: ccnew-vdl-setup
-          path: ccnew-vdl-setup.exe
+          path: |
+            ccnew-vdl-setup.exe
+            ccnew-vdl-setup.exe.sha256
 
   release:
     needs: [build-binary, build-installer]

@@ -49,3 +49,10 @@ ccnew-vdl-setup.exe
 # 构建临时目录
 build/
 
+
+# 临时截图/调试文件
+_*.png
+_edgeprof.bak/
+_edgeprof2/
+node_modules/
+*.old

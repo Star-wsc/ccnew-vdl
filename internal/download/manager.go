@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"crypto/rand"
+	"log"
+	"os/exec"
 	"os"
 	"path/filepath"
 	"sort"
@@ -164,6 +166,10 @@ func (m *Manager) ExecuteTask(ctx context.Context, taskID string) {
 			VideoURL: task.VideoURL,
 			Platform: task.Platform,
 			Quality:  task.Quality,
+		}
+		// 补充音频流URL
+		if parsed, parseErr := m.parseVideo(task.URL, task.Quality); parseErr == nil && parsed != nil && parsed.AudioURL != "" {
+			videoInfo.AudioURL = parsed.AudioURL
 		}
 		m.updateTaskStatus(taskID, StatusDownloading, "")
 		m.saveTasks()
@@ -467,6 +473,7 @@ func (m *Manager) parseVideo(url, quality string) (*videoInfo, error) {
 			Author:   info.Author,
 			CoverURL: info.CoverURL,
 			VideoURL: info.VideoURL,
+			AudioURL: info.AudioURL,
 			Platform: "douyin",
 			Quality:  actualQuality,
 		}, nil
@@ -495,10 +502,8 @@ func (m *Manager) downloadVideo(info *videoInfo, outputPath string, progressFunc
 		return m.bilibiliDownloader.Download(info.VideoURL, outputPath, progressFunc)
 
 	case "douyin":
-		// 使用抖音专用下载器
 		cookies := make(map[string]string)
 		if m.cfg.DouyinCookie != "" {
-			// 解析 Cookie 字符串
 			for _, part := range strings.Split(m.cfg.DouyinCookie, ";") {
 				part = strings.TrimSpace(part)
 				if kv := strings.SplitN(part, "=", 2); len(kv) == 2 {
@@ -506,11 +511,42 @@ func (m *Manager) downloadVideo(info *videoInfo, outputPath string, progressFunc
 				}
 			}
 		}
+		if info.AudioURL != "" {
+			log.Printf("[抖音] DASH音视频分离，下载并合并...")
+			videoTemp := outputPath + ".video.tmp"
+			audioTemp := outputPath + ".audio.tmp"
+			defer os.Remove(videoTemp)
+			defer os.Remove(audioTemp)
+			err := m.douyinDownloader.DownloadVideo(info.VideoURL, videoTemp, cookies, progressFunc)
+			if err != nil { return fmt.Errorf("下载视频流失败: %w", err) }
+			err = m.douyinDownloader.DownloadVideo(info.AudioURL, audioTemp, cookies, progressFunc)
+			if err != nil { return fmt.Errorf("下载音频流失败: %w", err) }
+			if err := mergeAudioVideo(videoTemp, audioTemp, outputPath); err != nil {
+				return fmt.Errorf("合并音视频失败: %w", err)
+			}
+			log.Printf("[抖音] 音视频合并成功")
+			return nil
+		}
 		return m.douyinDownloader.DownloadVideo(info.VideoURL, outputPath, cookies, progressFunc)
 
 	default:
 		return fmt.Errorf("不支持的平台")
 	}
+}
+
+
+func hasAudioTrack(filePath string) bool {
+	cmd := exec.Command("ffprobe", "-v", "quiet", "-select_streams", "a", "-show_entries", "stream=codec_type", "-of", "csv=p=0", filePath)
+	out, err := cmd.Output()
+	if err != nil { return true }
+	return strings.TrimSpace(string(out)) != ""
+}
+
+func mergeAudioVideo(videoPath, audioPath, outputPath string) error {
+	if p, err := exec.LookPath("ffmpeg"); err == nil {
+		return exec.Command(p, "-i", videoPath, "-i", audioPath, "-c:v", "copy", "-c:a", "copy", "-y", outputPath).Run()
+	}
+	return exec.Command("ffmpeg", "-i", videoPath, "-i", audioPath, "-c:v", "copy", "-c:a", "copy", "-y", outputPath).Run()
 }
 
 func (m *Manager) generateOutputPath(title, platform string) string {
@@ -548,6 +584,19 @@ func (m *Manager) SetBilibiliCookie(cookie string) {
 func (m *Manager) SetDouyinCookie(cookie string) {
 	m.douyinDownloader.SetCookies(cookie)
 	m.douyinCollection.SetCookies(cookie)
+}
+
+
+// ResetTaskForRetry 在锁内把失败任务重置为待执行
+func (m *Manager) ResetTaskForRetry(taskID string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	task, exists := m.tasks[taskID]
+	if !exists || task.Status != StatusFailed { return false }
+	task.Status = StatusPending
+	task.ErrorMessage = ""
+	task.UpdatedAt = time.Now()
+	return true
 }
 
 func (m *Manager) updateTaskStatus(taskID string, status TaskStatus, errorMsg string) {

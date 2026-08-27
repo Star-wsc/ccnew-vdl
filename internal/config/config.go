@@ -94,7 +94,8 @@ func (c *Config) Save() error {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
-	return os.WriteFile(configFile, data, 0644)
+	// 0600：配置含 Cookie，仅限当前用户可读
+	return os.WriteFile(configFile, data, 0600)
 }
 
 // sanitizeCookie 清理Cookie中的非法HTTP头字符

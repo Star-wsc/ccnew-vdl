@@ -15,7 +15,7 @@ RUN go mod download
 COPY . .
 
 # 编译
-ARG VERSION=v1.3.2
+ARG VERSION=v1.3.4
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags "-X main.Version=${VERSION}" -o server ./cmd/server/
 
 # 运行阶段

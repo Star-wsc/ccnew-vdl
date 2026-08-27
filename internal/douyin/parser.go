@@ -335,6 +335,9 @@ func (p *Parser) extractFromRenderData(data map[string]interface{}) *models.Vide
 		return nil
 	}
 
+	audioURL := videoURLs["_audio"]
+	delete(videoURLs, "_audio")
+
 	log.Printf("[抖音] 选择清晰度: %s (可用: %v)", selectedQuality, getKeys(videoURLs))
 
 	return &models.VideoInfo{
@@ -343,6 +346,7 @@ func (p *Parser) extractFromRenderData(data map[string]interface{}) *models.Vide
 		AuthorID:           authorID,
 		CoverURL:           coverURL,
 		VideoURL:           selectedURL,
+		AudioURL:		audioURL,
 		SelectedQuality:    selectedQuality,
 		AvailableQualities: getKeys(videoURLs),
 	}
@@ -384,6 +388,26 @@ func (p *Parser) extractVideoURLs(videoData map[string]interface{}) map[string]s
 
 	for q, u := range bitRateQualities {
 		urls[q] = u
+	}
+
+	if bitRateAudio, ok := videoData["bit_rate_audio"].([]interface{}); ok && len(bitRateAudio) > 0 {
+		for _, bra := range bitRateAudio {
+			braMap, ok := bra.(map[string]interface{})
+			if !ok { continue }
+			audioMeta, ok := braMap["audio_meta"].(map[string]interface{})
+			if !ok { continue }
+			urlListObj, ok := audioMeta["url_list"].(map[string]interface{})
+			if !ok { continue }
+			for _, key := range []string{"main_url", "backup_url", "fallback_url"} {
+				if u, ok := urlListObj[key].(string); ok && u != "" {
+					if strings.HasPrefix(u, "//") { u = "https:" + u }
+					urls["_audio"] = u
+					log.Printf("[抖音] 找到音频流URL")
+					break
+				}
+			}
+			if _, has := urls["_audio"]; has { break }
+		}
 	}
 
 	playAddr, _ := videoData["play_addr"].(map[string]interface{})
@@ -627,6 +651,9 @@ func (p *Parser) parseAwemeDetail(detail map[string]interface{}) *models.VideoIn
 		return nil
 	}
 
+	audioURL2 := videoURLs["_audio"]
+	delete(videoURLs, "_audio")
+
 	log.Printf("[抖音-API] 选择清晰度: %s (可用: %v)", selectedQuality, getKeys(videoURLs))
 
 	return &models.VideoInfo{
@@ -635,6 +662,7 @@ func (p *Parser) parseAwemeDetail(detail map[string]interface{}) *models.VideoIn
 		AuthorID:           authorID,
 		CoverURL:           coverURL,
 		VideoURL:           selectedURL,
+		AudioURL:           audioURL2,
 		SelectedQuality:    selectedQuality,
 		AvailableQualities: getKeys(videoURLs),
 	}

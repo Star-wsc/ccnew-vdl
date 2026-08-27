@@ -329,77 +329,134 @@ func (p *CollectionParser) buildCollectionInfo(mixID, title string, awemeList in
 	}
 }
 
+// douyinAwemeItem 是合集接口返回的单个视频条目。
+type douyinAwemeItem struct {
+	AwemeID string `json:"aweme_id"`
+	Desc    string `json:"desc"`
+	Author  struct {
+		Nickname string `json:"nickname"`
+	} `json:"author"`
+	Video struct {
+		Cover struct {
+			URLList []string `json:"url_list"`
+		} `json:"cover"`
+		Duration int `json:"duration"`
+	} `json:"video"`
+	ShareInfo struct {
+		ShareURL string `json:"share_url"`
+	} `json:"share_info"`
+}
+
+// douyinAwemePage 是 listcollection 接口的单页响应。
+type douyinAwemePage struct {
+	StatusCode int              `json:"status_code"`
+	HasMore    bool             `json:"has_more"`
+	Cursor     int64            `json:"cursor"`
+	AwemeList  []douyinAwemeItem `json:"aweme_list"`
+}
+
+// maxDouyinCollectionPages 限制翻页上限（25页×20条=500条），防止接口异常时死循环。
+const maxDouyinCollectionPages = 25
 func (p *CollectionParser) fetchCollectionByAPI(collectionID string) (*CollectionInfo, error) {
-	apiURL := fmt.Sprintf("https://www.douyin.com/aweme/v1/web/aweme/listcollection/?collection_id=%s&cursor=0&count=20&aid=6383", collectionID)
+	var videos []*CollectionVideoInfo
+	cursor := int64(0)
+	seen := make(map[string]bool)
 
-	req, err := http.NewRequest("GET", apiURL, nil)
-	if err != nil {
-		return nil, err
+	// 防御式翻页：接口若不支持翻页/中途反爬，只保留已获取结果，
+	// 行为退化为旧版单页，绝不因第2页起失败而丢弃首页数据。
+	for page := 1; page <= maxDouyinCollectionPages; page++ {
+		apiURL := fmt.Sprintf("https://www.douyin.com/aweme/v1/web/aweme/listcollection/?collection_id=%s&cursor=%d&count=20&aid=6383", collectionID, cursor)
+
+		req, err := http.NewRequest("GET", apiURL, nil)
+		if err != nil {
+			if page == 1 {
+				return nil, err
+			}
+			log.Printf("[抖音合集] 第%d页请求失败，使用已获取的%d条: %v", page, len(videos), err)
+			break
+		}
+		p.setHeaders(req)
+
+		resp, err := p.client.Do(req)
+		if err != nil {
+			if page == 1 {
+				return nil, err
+			}
+			log.Printf("[抖音合集] 第%d页网络失败，使用已获取的%d条: %v", page, len(videos), err)
+			break
+		}
+
+		body, readErr := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if readErr != nil || len(body) == 0 || body[0] == '<' {
+			if page == 1 {
+				return nil, fmt.Errorf("API返回非JSON")
+			}
+			log.Printf("[抖音合集] 第%d页疑似反爬墙，停止翻页，保留已获取的%d条", page, len(videos))
+			break
+		}
+
+		var result douyinAwemePage
+		if err := json.Unmarshal(body, &result); err != nil {
+			if page == 1 {
+				return nil, err
+			}
+			log.Printf("[抖音合集] 第%d页解析失败，停止翻页: %v", page, err)
+			break
+		}
+
+		if result.StatusCode != 0 {
+			if len(videos) == 0 {
+				return nil, fmt.Errorf("API返回错误或无数据")
+			}
+			log.Printf("[抖音合集] 第%d页返回status_code=%d，停止翻页", page, result.StatusCode)
+			break
+		}
+
+		newCount := 0
+		for _, aweme := range result.AwemeList {
+			if seen[aweme.AwemeID] {
+				continue // 接口假装支持翻页重复返回时立即止损
+			}
+			seen[aweme.AwemeID] = true
+			coverURL := ""
+			if len(aweme.Video.Cover.URLList) > 0 {
+				coverURL = aweme.Video.Cover.URLList[0]
+			}
+			shareURL := aweme.ShareInfo.ShareURL
+			if shareURL == "" {
+				shareURL = fmt.Sprintf("https://www.douyin.com/video/%s", aweme.AwemeID)
+			}
+			videos = append(videos, &CollectionVideoInfo{
+				VideoID:  aweme.AwemeID,
+				URL:      shareURL,
+				Title:    aweme.Desc,
+				Author:   aweme.Author.Nickname,
+				CoverURL: coverURL,
+				Duration: aweme.Video.Duration / 1000,
+				Page:     len(videos),
+			})
+			newCount++
+		}
+
+		if page > 1 && newCount == 0 {
+			log.Printf("[抖音合集] 第%d页无新增视频，判定接口不支持翻页，停止", page)
+			break
+		}
+
+		if !result.HasMore || len(result.AwemeList) == 0 {
+			break
+		}
+		if result.Cursor > 0 {
+			cursor = result.Cursor
+		} else {
+			cursor += int64(len(result.AwemeList))
+		}
+		time.Sleep(250 * time.Millisecond)
 	}
-	p.setHeaders(req)
 
-	resp, err := p.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	if len(body) == 0 || body[0] == '<' {
-		return nil, fmt.Errorf("API返回非JSON")
-	}
-
-	var result struct {
-		StatusCode int    `json:"status_code"`
-		AwemeList  []struct {
-			AwemeID string `json:"aweme_id"`
-			Desc    string `json:"desc"`
-			Author  struct {
-				Nickname string `json:"nickname"`
-			} `json:"author"`
-			Video struct {
-				Cover struct {
-					URLList []string `json:"url_list"`
-				} `json:"cover"`
-				Duration int `json:"duration"`
-			} `json:"video"`
-			ShareInfo struct {
-				ShareURL string `json:"share_url"`
-			} `json:"share_info"`
-		} `json:"aweme_list"`
-	}
-
-	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, err
-	}
-
-	if result.StatusCode != 0 || len(result.AwemeList) == 0 {
+	if len(videos) == 0 {
 		return nil, fmt.Errorf("API返回错误或无数据")
-	}
-
-	videos := make([]*CollectionVideoInfo, 0, len(result.AwemeList))
-	for i, aweme := range result.AwemeList {
-		coverURL := ""
-		if len(aweme.Video.Cover.URLList) > 0 {
-			coverURL = aweme.Video.Cover.URLList[0]
-		}
-		shareURL := aweme.ShareInfo.ShareURL
-		if shareURL == "" {
-			shareURL = fmt.Sprintf("https://www.douyin.com/video/%s", aweme.AwemeID)
-		}
-		videos = append(videos, &CollectionVideoInfo{
-			VideoID:  aweme.AwemeID,
-			URL:      shareURL,
-			Title:    aweme.Desc,
-			Author:   aweme.Author.Nickname,
-			CoverURL: coverURL,
-			Duration: aweme.Video.Duration / 1000,
-			Page:     i + 1,
-		})
 	}
 
 	return &CollectionInfo{
@@ -409,7 +466,6 @@ func (p *CollectionParser) fetchCollectionByAPI(collectionID string) (*Collectio
 		Videos:     videos,
 	}, nil
 }
-
 func (p *CollectionParser) fetchCollectionFromHTML(collectionID, urlStr string) (*CollectionInfo, error) {
 	pageURL := urlStr
 	if pageURL == "" {

@@ -2,11 +2,15 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,12 +19,14 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/Star-wsc/ccnew-vdl/internal/bilibili"
 	"github.com/Star-wsc/ccnew-vdl/internal/config"
-	"github.com/Star-wsc/ccnew-vdl/internal/download"
 	"github.com/Star-wsc/ccnew-vdl/internal/douyin"
+	"github.com/Star-wsc/ccnew-vdl/internal/download"
+	"github.com/Star-wsc/ccnew-vdl/internal/fsutil"
 	"github.com/gin-gonic/gin"
 )
 
@@ -52,28 +58,29 @@ type CollectionVideoInfo struct {
 	CoverURL     string `json:"cover_url"`
 	Duration     int    `json:"duration"`
 	Page         int    `json:"page"`
-	Status       string `json:"status"`        // pending/downloading/completed/failed
-	Progress     int    `json:"progress"`       // 0-100
+	Status       string `json:"status"`   // pending/downloading/completed/failed
+	Progress     int    `json:"progress"` // 0-100
+	Speed        int64  `json:"speed"`
 	FilePath     string `json:"file_path"`
 	FileSize     int64  `json:"file_size"`
 	ErrorMessage string `json:"error_message"`
 }
 
 type CollectionInfo struct {
-	ID              string               `json:"id"`
-	URL             string               `json:"url"`
-	Title           string               `json:"title"`
-	Author          string               `json:"author"`
-	CoverURL        string               `json:"cover_url"`
-	TotalCount      int                  `json:"total_count"`
+	ID              string                 `json:"id"`
+	URL             string                 `json:"url"`
+	Title           string                 `json:"title"`
+	Author          string                 `json:"author"`
+	CoverURL        string                 `json:"cover_url"`
+	TotalCount      int                    `json:"total_count"`
 	Videos          []*CollectionVideoInfo `json:"videos"`
-	Status          string               `json:"status"`
-	Quality         string               `json:"quality"`
-	CreatedAt       time.Time            `json:"created_at"`
-	Subscribed      bool                 `json:"subscribed"`       // 是否订阅
-	SelectedIndices []int                `json:"selected_indices"`  // 用户选中的视频索引
-	LastRefresh     time.Time            `json:"last_refresh"`      // 上次刷新时间
-	RefreshInterval int                  `json:"refresh_interval"`  // 刷新间隔（分钟），默认60
+	Status          string                 `json:"status"`
+	Quality         string                 `json:"quality"`
+	CreatedAt       time.Time              `json:"created_at"`
+	Subscribed      bool                   `json:"subscribed"`       // 是否订阅
+	SelectedIndices []int                  `json:"selected_indices"` // 用户选中的视频索引
+	LastRefresh     time.Time              `json:"last_refresh"`     // 上次刷新时间
+	RefreshInterval int                    `json:"refresh_interval"` // 刷新间隔（分钟），默认60
 }
 
 // ==================== Handlers ====================
@@ -135,7 +142,7 @@ func (h *Handlers) addLog(level, taskID, message string) {
 func (h *Handlers) Index(c *gin.Context) {
 	exePath, _ := os.Executable()
 	exeDir := filepath.Dir(exePath)
-	c.File(filepath.Join(exeDir, "static", "index.html"))
+	c.File(filepath.Join(exeDir, "static", "index-v2.html"))
 }
 
 // ==================== Config ====================
@@ -281,6 +288,9 @@ func (h *Handlers) LoginBilibili(c *gin.Context) {
 	cookiePath := filepath.Join(os.TempDir(), "bilibili_cookies.txt")
 	os.Remove(cookiePath)
 
+	// 无论登录成功与否，请求结束后都清掉含凭据的临时文件
+	defer os.Remove(cookiePath)
+
 	wv2Core := filepath.Join(exeDir, "webview2", "Microsoft.Web.WebView2.Core.dll")
 	wv2Wpf := filepath.Join(exeDir, "webview2", "Microsoft.Web.WebView2.Wpf.dll")
 
@@ -366,6 +376,83 @@ func (h *Handlers) PollBilibiliLogin(c *gin.Context) {
 
 // ==================== Proxy ====================
 
+// ---- 反 SSRF 白名单闸门：仅允许代理两家平台的封面/媒体 CDN ----
+
+var proxyAllowedHostSuffixes = []string{
+	// Bilibili
+	"hdslb.com",
+	"biliimg.com",
+	"bilibili.com",
+	"bilivideo.com",
+	"bilivideo.cn",
+	// Douyin / ByteDance 媒体资源
+	"douyinpic.com",
+	"douyinvod.com",
+	"douyinstatic.com",
+	"byteimg.com",
+	"zjcdn.com",
+	"snssdk.com",
+	"amemv.com",
+}
+
+// isProxyURLAllowed 判断目标是否为白名单内的平台资源地址。
+func isProxyURLAllowed(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Hostname() == "" {
+		return false
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	if net.ParseIP(host) != nil {
+		return false // 禁止 IP 直连，防止直指内网
+	}
+	for _, sfx := range proxyAllowedHostSuffixes {
+		if host == sfx || strings.HasSuffix(host, "."+sfx) {
+			return true
+		}
+	}
+	return false
+}
+
+func isBlockedProxyIP(ip net.IP) bool {
+	return ip == nil || ip.IsUnspecified() || ip.IsLoopback() ||
+		ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast()
+}
+
+// proxyDialControl 在建连前校验已解析的 IP，防 DNS rebinding 绕过域名白名单。
+func proxyDialControl(_, address string, _ syscall.RawConn) error {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return err
+	}
+	if isBlockedProxyIP(net.ParseIP(host)) {
+		return fmt.Errorf("proxy target resolved to blocked address %s", host)
+	}
+	return nil
+}
+
+// newProxiedClient 构造带重定向校验与建连层 IP 校验的代理专用客户端。
+func newProxiedClient(timeout time.Duration) *http.Client {
+	dialer := &net.Dialer{Timeout: 10 * time.Second, Control: proxyDialControl}
+	return &http.Client{
+		Timeout: timeout,
+		Transport: &http.Transport{
+			DialContext: dialer.DialContext,
+			Proxy:       http.ProxyFromEnvironment,
+		},
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 5 {
+				return fmt.Errorf("too many redirects")
+			}
+			if !isProxyURLAllowed(req.URL.String()) {
+				return fmt.Errorf("redirect to non-whitelisted host blocked")
+			}
+			return nil
+		},
+	}
+}
 func (h *Handlers) ProxyImage(c *gin.Context) {
 	imageURL := c.Query("url")
 	if imageURL == "" {
@@ -373,7 +460,12 @@ func (h *Handlers) ProxyImage(c *gin.Context) {
 		return
 	}
 
-	client := &http.Client{Timeout: 15 * time.Second}
+	if !isProxyURLAllowed(imageURL) {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "不支持的代理目标"})
+		return
+	}
+
+	client := newProxiedClient(15 * time.Second)
 	req, err := http.NewRequest("GET", imageURL, nil)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "创建请求失败"})
@@ -418,7 +510,12 @@ func (h *Handlers) ProxyFileDownload(c *gin.Context) {
 		return
 	}
 
-	client := &http.Client{Timeout: 600 * time.Second}
+	if !isProxyURLAllowed(fileURL) {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "不支持的代理目标"})
+		return
+	}
+
+	client := newProxiedClient(600 * time.Second)
 	req, err := http.NewRequest("GET", fileURL, nil)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "创建请求失败"})
@@ -476,6 +573,7 @@ func (h *Handlers) GetStats(c *gin.Context) {
 	collectionsDownloading := 0
 	collectionsCompleted := 0
 	collectionsFailed := 0
+	var collectionSpeed int64
 	for _, col := range h.collections {
 		switch col.Status {
 		case "downloading":
@@ -484,6 +582,11 @@ func (h *Handlers) GetStats(c *gin.Context) {
 			collectionsCompleted++
 		case "partial", "failed":
 			collectionsFailed++
+		}
+		for _, video := range col.Videos {
+			if video.Status == "downloading" {
+				collectionSpeed += video.Speed
+			}
 		}
 	}
 	h.collectionsMu.RUnlock()
@@ -496,19 +599,20 @@ func (h *Handlers) GetStats(c *gin.Context) {
 		}
 	}
 
+	globalSpeed += collectionSpeed
 	c.JSON(http.StatusOK, gin.H{
-		"total":                total + collectionsTotal,
-		"pending":              pending,
-		"parsing":              parsing,
-		"downloading":          downloading + collectionsDownloading,
-		"completed":            completed + collectionsCompleted,
-		"failed":               failed + collectionsFailed,
-		"single_total":         total,
-		"collections_total":    collectionsTotal,
+		"total":                   total + collectionsTotal,
+		"pending":                 pending,
+		"parsing":                 parsing,
+		"downloading":             downloading + collectionsDownloading,
+		"completed":               completed + collectionsCompleted,
+		"failed":                  failed + collectionsFailed,
+		"single_total":            total,
+		"collections_total":       collectionsTotal,
 		"collections_downloading": collectionsDownloading,
 		"collections_completed":   collectionsCompleted,
 		"collections_failed":      collectionsFailed,
-		"global_speed":         globalSpeed,
+		"global_speed":            globalSpeed,
 	})
 }
 
@@ -634,13 +738,19 @@ func (h *Handlers) CreateTaskFromPreview(c *gin.Context) {
 		req.Quality = "1080p"
 	}
 
-	existing := h.mgr.FindTaskByURL(req.URL)
+	// 从分享文本中提取纯URL
+	extractedURL := extractFirstURL(req.URL)
+	if extractedURL == "" {
+		extractedURL = req.URL
+	}
+
+	existing := h.mgr.FindTaskByURL(extractedURL)
 	if existing != nil {
 		c.JSON(http.StatusOK, existing)
 		return
 	}
 
-	task := h.mgr.CreateTask(req.URL, req.Quality)
+	task := h.mgr.CreateTask(extractedURL, req.Quality)
 
 	// 从预览数据中填充任务信息（避免重复解析）
 	if req.PreviewData != nil {
@@ -715,8 +825,12 @@ func (h *Handlers) RetryTask(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"detail": "只能重试失败的任务"})
 		return
 	}
-	task.Status = StatusPending
-	task.ErrorMessage = ""
+	if !h.mgr.ResetTaskForRetry(taskID) {
+		c.JSON(http.StatusConflict, gin.H{"detail": "任务状态已变化，无法重试"})
+		return
+	}
+
+	task = h.mgr.GetTask(taskID)
 	go h.mgr.ExecuteTask(context.Background(), task.ID)
 	c.JSON(http.StatusOK, task)
 }
@@ -789,13 +903,13 @@ func (h *Handlers) PreviewCollection(c *gin.Context) {
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{
-			"type":       "collection",
-			"platform":   "douyin",
-			"title":      info.Title,
-			"author":     info.Author,
-			"count":      info.TotalCount,
+			"type":        "collection",
+			"platform":    "douyin",
+			"title":       info.Title,
+			"author":      info.Author,
+			"count":       info.TotalCount,
 			"total_count": info.TotalCount,
-			"videos":     info.Videos,
+			"videos":      info.Videos,
 		})
 	} else if isBilibili {
 		info, err := h.bilibiliCollection.ParseCollection(req.URL)
@@ -804,13 +918,13 @@ func (h *Handlers) PreviewCollection(c *gin.Context) {
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{
-			"type":       "collection",
-			"platform":   "bilibili",
-			"title":      info.Title,
-			"author":     info.Author,
-			"count":      info.TotalCount,
+			"type":        "collection",
+			"platform":    "bilibili",
+			"title":       info.Title,
+			"author":      info.Author,
+			"count":       info.TotalCount,
 			"total_count": info.TotalCount,
-			"videos":     info.Videos,
+			"videos":      info.Videos,
 		})
 	} else {
 		c.JSON(http.StatusBadRequest, gin.H{"detail": "不支持的链接格式"})
@@ -935,6 +1049,23 @@ func (h *Handlers) downloadCollectionVideoFile(colID string, video *CollectionVi
 	video.ErrorMessage = ""
 	h.collectionsMu.Unlock()
 
+	var lastDL int64
+	lastTS := time.Now()
+	updateProgress := func(downloaded, total int64) {
+		h.collectionsMu.Lock()
+		defer h.collectionsMu.Unlock()
+		if total > 0 {
+			video.Progress = int(downloaded * 100 / total)
+		}
+		now := time.Now()
+		dt := now.Sub(lastTS).Seconds()
+		if dt >= 0.5 {
+			video.Speed = int64(float64(downloaded-lastDL) / dt)
+			lastDL = downloaded
+			lastTS = now
+		}
+	}
+
 	h.addLog("INFO", colID, fmt.Sprintf("开始下载: %s", video.Title))
 
 	// 解析视频
@@ -994,19 +1125,11 @@ func (h *Handlers) downloadCollectionVideoFile(colID string, video *CollectionVi
 		}
 		if biliInfo.AudioURL != "" {
 			downloadErr = downloader.DownloadWithMerge(biliInfo.VideoURL, biliInfo.AudioURL, outputPath, func(downloaded, total int64) {
-				h.collectionsMu.Lock()
-				if total > 0 {
-					video.Progress = int(downloaded * 100 / total)
-				}
-				h.collectionsMu.Unlock()
+				updateProgress(downloaded, total)
 			})
 		} else {
 			downloadErr = downloader.Download(biliInfo.VideoURL, outputPath, func(downloaded, total int64) {
-				h.collectionsMu.Lock()
-				if total > 0 {
-					video.Progress = int(downloaded * 100 / total)
-				}
-				h.collectionsMu.Unlock()
+				updateProgress(downloaded, total)
 			})
 		}
 	case "douyin":
@@ -1021,11 +1144,7 @@ func (h *Handlers) downloadCollectionVideoFile(colID string, video *CollectionVi
 		}
 		cookies := make(map[string]string)
 		downloadErr = douyinDl.DownloadVideo(douyinInfo.VideoURL, outputPath, cookies, func(downloaded, total int64) {
-			h.collectionsMu.Lock()
-			if total > 0 {
-				video.Progress = int(downloaded * 100 / total)
-			}
-			h.collectionsMu.Unlock()
+			updateProgress(downloaded, total)
 		})
 	default:
 		downloadErr = fmt.Errorf("不支持的平台")
@@ -1038,6 +1157,7 @@ func (h *Handlers) downloadCollectionVideoFile(colID string, video *CollectionVi
 		h.addLog("ERROR", colID, fmt.Sprintf("下载失败: %s - %v", video.Title, downloadErr))
 	} else {
 		video.Status = "completed"
+		video.Speed = 0
 		video.Progress = 100
 		video.FilePath = outputPath
 		if info, err := os.Stat(outputPath); err == nil {
@@ -1058,11 +1178,11 @@ func (h *Handlers) previewCollection(url string) (gin.H, error) {
 			return nil, err
 		}
 		return gin.H{
-			"type":     "collection",
-			"title":    info.Title,
-			"author":   info.Author,
-			"count":    info.TotalCount,
-			"videos":   info.Videos,
+			"type":   "collection",
+			"title":  info.Title,
+			"author": info.Author,
+			"count":  info.TotalCount,
+			"videos": info.Videos,
 		}, nil
 	case "douyin":
 		info, err := h.douyinCollection.ParseCollection(url)
@@ -1070,11 +1190,11 @@ func (h *Handlers) previewCollection(url string) (gin.H, error) {
 			return nil, err
 		}
 		return gin.H{
-			"type":     "collection",
-			"title":    info.Title,
-			"author":   info.Author,
-			"count":    info.TotalCount,
-			"videos":   info.Videos,
+			"type":   "collection",
+			"title":  info.Title,
+			"author": info.Author,
+			"count":  info.TotalCount,
+			"videos": info.Videos,
 		}, nil
 	default:
 		return nil, fmt.Errorf("不支持的平台")
@@ -1102,6 +1222,9 @@ func (h *Handlers) downloadSelectedCollectionVideos(colID string, indices []int,
 
 	log.Printf("[INFO] %s: 开始下载选中视频: %s, 选中数: %d", colID, col.Title, len(indices))
 	h.addLog("INFO", colID, fmt.Sprintf("开始下载选中视频: %s, 选中数: %d", col.Title, len(indices)))
+	h.collectionsMu.Lock()
+	col.Status = "downloading"
+	h.collectionsMu.Unlock()
 
 	selectedSet := make(map[int]bool)
 	for _, idx := range indices {
@@ -1182,7 +1305,6 @@ func (h *Handlers) GetCollectionVideos(c *gin.Context) {
 func (h *Handlers) DeleteCollection(c *gin.Context) {
 	id := c.Param("id")
 	deleteFile := c.Query("deleteFile") == "true"
-
 
 	h.collectionsMu.Lock()
 	col, exists := h.collections[id]
@@ -1390,7 +1512,9 @@ func (h *Handlers) downloadCollectionVideos(colID, quality string) {
 
 	log.Printf("[INFO] %s: 开始下载合集: %s, 视频数: %d", colID, col.Title, len(col.Videos))
 	h.addLog("INFO", colID, fmt.Sprintf("开始下载合集: %s, 视频数: %d", col.Title, len(col.Videos)))
+	h.collectionsMu.Lock()
 	col.Status = "downloading"
+	h.collectionsMu.Unlock()
 
 	sem := make(chan struct{}, 5)
 	var wg sync.WaitGroup
@@ -1472,7 +1596,7 @@ func (h *Handlers) ToggleCollectionSubscribe(c *gin.Context) {
 	id := c.Param("id")
 
 	var req struct {
-		Subscribe      bool `json:"subscribe"`
+		Subscribe       bool `json:"subscribe"`
 		RefreshInterval int  `json:"refresh_interval"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -1686,7 +1810,6 @@ func (h *Handlers) refreshCollection(colID string) {
 	}
 }
 
-
 func extractFirstURL(text string) string {
 	re := regexp.MustCompile(`https?://[^\s<>"']+`)
 	match := re.FindString(text)
@@ -1713,7 +1836,7 @@ func (h *Handlers) saveCollections() error {
 
 	filePath := h.getCollectionsFilePath()
 	os.MkdirAll(filepath.Dir(filePath), 0755)
-	return os.WriteFile(filePath, data, 0644)
+	return fsutil.WriteFileAtomic(filePath, data)
 }
 
 func (h *Handlers) loadCollections() error {
@@ -1732,8 +1855,45 @@ func (h *Handlers) loadCollections() error {
 
 	return json.Unmarshal(data, &h.collections)
 }
+
 // ==================== Auto Update ====================
 
+// verifySHA256File 下载 "<hash>  <filename>" 格式的校验文件并比对本地文件。
+func verifySHA256File(path, sumsURL string) error {
+	resp, err := http.Get(sumsURL)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("校验和下载失败: HTTP %d", resp.StatusCode)
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if err != nil {
+		return err
+	}
+	fields := strings.Fields(string(data))
+	if len(fields) == 0 {
+		return fmt.Errorf("校验和文件为空")
+	}
+	expected := strings.ToLower(strings.TrimSpace(fields[0]))
+
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	digest := sha256.New()
+	if _, err := io.Copy(digest, f); err != nil {
+		return err
+	}
+	actual := hex.EncodeToString(digest.Sum(nil))
+	if actual != expected {
+		return fmt.Errorf("SHA256 不匹配: 期望 %s 实际 %s", expected, actual)
+	}
+	return nil
+}
 func (h *Handlers) TriggerUpdate(c *gin.Context) {
 	if runtime.GOOS != "windows" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "自动更新仅支持Windows"})
@@ -1761,11 +1921,21 @@ func (h *Handlers) TriggerUpdate(c *gin.Context) {
 		return
 	}
 
-	var setupURL string
+	// 已是最新版本则不重复下载安装（dev 版本跳过比较）
+	local := strings.TrimPrefix(Version, "v")
+	remote := strings.TrimPrefix(release.TagName, "v")
+	if Version != "dev" && local != "" && local == remote {
+		c.JSON(http.StatusOK, gin.H{"message": "已是最新版本，无需更新", "version": Version})
+		return
+	}
+
+	var setupURL, sumURL string
 	for _, asset := range release.Assets {
-		if asset.Name == "ccnew-vdl-setup.exe" {
+		switch asset.Name {
+		case "ccnew-vdl-setup.exe":
 			setupURL = asset.BrowserDownloadURL
-			break
+		case "ccnew-vdl-setup.exe.sha256":
+			sumURL = asset.BrowserDownloadURL
 		}
 	}
 
@@ -1800,6 +1970,15 @@ func (h *Handlers) TriggerUpdate(c *gin.Context) {
 	if written < 1024 {
 		os.Remove(setupPath)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "安装包文件异常"})
+		return
+	}
+
+	// 优先校验完整性，防止被篡改的安装包被执行
+	if sumURL == "" {
+		log.Println("[WARN] 最新版本未提供SHA256校验文件，跳过完整性校验")
+	} else if err := verifySHA256File(setupPath, sumURL); err != nil {
+		os.Remove(setupPath)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "安装包校验失败，已取消更新: " + err.Error()})
 		return
 	}
 
