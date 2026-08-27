@@ -1,0 +1,120 @@
+import { Button, LineEdit, ScrollView, VerticalBox, HorizontalBox, 
+         GroupBox, ComboBox, ProgressBox, StandardButton, Palette,
+         GridBox, Spinner } from "std-widgets.slint";
+
+export component AppWindow inherits Window {
+    title: "CCNEW 视频下载器";
+    preferred-width: 1100px;
+    preferred-height: 720px;
+    icon: @image-url("../icon.ico");
+    
+    in-out property <string> url-input: "";
+    in-out property <string> status-text: "就绪";
+    in-out property <float> global-speed: 0;
+    in-out property <int> downloading-count: 0;
+    in-out property <int> completed-count: 0;
+    in-out property <int> failed-count: 0;
+    
+    callback parse-clicked(string);
+    callback url-submitted(string);
+    
+    VerticalLayout {
+        // 顶部标题栏
+        header := HorizontalLayout {
+            height: 52px;
+            spacing: 16px;
+            padding-left: 20px;
+            padding-right: 20px;
+            alignment: center;
+            
+            Text {
+                text: "CCNEW";
+                font-size: 18px;
+                font-weight: 700;
+                color: #00ffa3;
+                vertical-alignment: center;
+            }
+            
+            Text {
+                text: "视频下载器";
+                font-size: 13px;
+                color: #8a94aa;
+                vertical-alignment: center;
+            }
+            
+            Rectangle { width: 1px; }
+            
+            // 状态指示
+            HorizontalLayout {
+                spacing: 20px;
+                alignment: center;
+                
+                stat-item(label, value, col) := VerticalLayout {
+                    alignment: center;
+                    Text { text: label; font-size: 10px; color: #59637a; horizontal-alignment: center; }
+                    Text { text: value; font-size: 14px; color: col; font-weight: 600; horizontal-alignment: center; }
+                }
+                
+                stat-item { label: "速度"; value: root.global-speed; col: #00ffa3; }
+                stat-item { label: "下载中"; value: root.downloading-count; col: #3dd6ff; }
+                stat-item { label: "已完成"; value: root.completed-count; col: #00ffa3; }
+                stat-item { label: "失败"; value: root.failed-count; col: #ff5470; }
+            }
+        }
+        
+        // 输入区域
+        input-area := Rectangle {
+            height: 100px;
+            background: rgba(14, 20, 32, 0.62);
+            border-radius: 12px;
+            border-width: 1px;
+            border-color: rgba(255, 255, 255, 0.08);
+            
+            VerticalLayout {
+                padding: 16px;
+                spacing: 10px;
+                
+                Text {
+                    text: "粘贴链接 · 回车或点击解析";
+                    font-size: 11px;
+                    color: #59637a;
+                }
+                
+                HorizontalLayout {
+                    spacing: 10px;
+                    
+                    url-edit := LineEdit {
+                        text: root.url-input;
+                        placeholder-text: "粘贴 B站 / 抖音 视频、合集链接…";
+                        accepted => { root.url-submitted(self.text); }
+                        edited(text) => { root.url-input = text; }
+                        horizontal-stretch: 1;
+                    }
+                    
+                    parse-btn := Button {
+                        text: "解析";
+                        primary: true;
+                        clicked => { root.parse-clicked(root.url-input); }
+                    }
+                }
+            }
+        }
+        
+        // 主内容区（任务列表）
+        task-scroll := ScrollView {
+            vertical-stretch: 1;
+            
+            VerticalLayout {
+                padding: 16px;
+                spacing: 8px;
+                
+                Text {
+                    text: "暂无下载任务 · 粘贴链接开始捕获";
+                    color: #59637a;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+        }
+    }
+}
