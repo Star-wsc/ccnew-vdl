@@ -114,13 +114,13 @@ impl DownloadManager {
                     let cookies = parse_cookies(&douyin_cookie);
                     let tasks_ref = self.tasks.clone();
                     let tid = task_id.to_string();
-                    self.download_douyin(&video_info.video_url, &video_tmp, &cookies, move |dl, _| {
+                    self.download_douyin(&video_info.video_url, &video_tmp, &cookies, move |dl, _, spd, prog| {
                         let tasks = tasks_ref.clone(); let tid = tid.clone();
                         tokio::spawn(async move {
                             if let Some(t) = tasks.write().await.get_mut(&tid) { t.downloaded_bytes = dl; }
                         });
                     }).await?;
-                    self.download_douyin(&video_info.audio_url, &audio_tmp, &cookies, |_, _| {}).await?;
+                    self.download_douyin(&video_info.audio_url, &audio_tmp, &cookies, |_, _, _, _| {}).await?;
                     merge_audio_video(&video_tmp, &audio_tmp, &output).await?;
                     let _ = std::fs::remove_file(&video_tmp);
                     let _ = std::fs::remove_file(&audio_tmp);
@@ -129,7 +129,7 @@ impl DownloadManager {
                     let cookies = parse_cookies(&douyin_cookie);
                     let tasks_ref = self.tasks.clone();
                     let tid = task_id.to_string();
-                    self.download_douyin(&video_info.video_url, &output, &cookies, move |dl, _| {
+                    self.download_douyin(&video_info.video_url, &output, &cookies, move |dl, _, spd, prog| {
                         let tasks = tasks_ref.clone(); let tid = tid.clone();
                         tokio::spawn(async move {
                             if let Some(t) = tasks.write().await.get_mut(&tid) { t.downloaded_bytes = dl; }
@@ -165,7 +165,7 @@ impl DownloadManager {
                 } else {
                     let tasks_ref = self.tasks.clone();
                     let tid = task_id.to_string();
-                    self.download_bilibili(&video_info.video_url, &output, &bilibili_cookie, move |dl, _| {
+                    self.download_bilibili(&video_info.video_url, &output, &bilibili_cookie, move |dl, _, spd, prog| {
                         let tasks = tasks_ref.clone(); let tid = tid.clone();
                         tokio::spawn(async move {
                             if let Some(t) = tasks.write().await.get_mut(&tid) { t.downloaded_bytes = dl; }
@@ -227,7 +227,7 @@ impl DownloadManager {
 
     // ====== 抖音下载 (带Cookie和Content-Type检查) ======
 
-    async fn download_douyin<F: Fn(u64, u64)>(&self, url: &str, path: &Path, cookies: &HashMap<String, String>, cb: F) -> Result<()> {
+    async fn download_douyin<F: Fn(u64, u64, i64, i32)>(&self, url: &str, path: &Path, cookies: &HashMap<String, String>, cb: F) -> Result<()> {
         let mut req = self.client.get(url)
             .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
             .header("Referer", "https://www.douyin.com/")
@@ -255,7 +255,7 @@ impl DownloadManager {
             }
             // 不是HTML，写入文件
             tokio::fs::write(path, &bytes).await?;
-            cb(bytes.len() as u64, bytes.len() as u64);
+            cb(bytes.len() as u64, bytes.len() as u64, 0, 100);
             return Ok(());
         }
 
@@ -269,14 +269,14 @@ impl DownloadManager {
             let chunk = chunk?;
             file.write_all(&chunk).await?;
             downloaded += chunk.len() as u64;
-            cb(downloaded, total);
+            cb(downloaded, total, 0, if total > 0 { (downloaded * 100 / total) as i32 } else { 0 });
         }
         Ok(())
     }
 
     // ====== B站下载 (带重试和正确Headers) ======
 
-    async fn download_bilibili<F: Fn(u64, u64)>(&self, url: &str, path: &Path, cookies: &str, cb: F) -> Result<()> {
+    async fn download_bilibili<F: Fn(u64, u64, i64, i32)>(&self, url: &str, path: &Path, cookies: &str, cb: F) -> Result<()> {
         for attempt in 0..3 {
             if attempt > 0 {
                 info!("[B站] 重试第{}次...", attempt);
@@ -293,7 +293,7 @@ impl DownloadManager {
         anyhow::bail!("B站下载失败(重试3次)")
     }
 
-    async fn download_bilibili_once<F: Fn(u64, u64)>(&self, url: &str, path: &Path, cookies: &str, cb: &F) -> Result<()> {
+    async fn download_bilibili_once<F: Fn(u64, u64, i64, i32)>(&self, url: &str, path: &Path, cookies: &str, cb: &F) -> Result<()> {
         let mut req = self.client.get(url)
             .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
             .header("Referer", "https://www.bilibili.com")
@@ -322,7 +322,7 @@ impl DownloadManager {
                 }
             }
             tokio::fs::write(path, &bytes).await?;
-            cb(bytes.len() as u64, bytes.len() as u64);
+            cb(bytes.len() as u64, bytes.len() as u64, 0, 100);
             return Ok(());
         }
 
@@ -336,7 +336,7 @@ impl DownloadManager {
             let chunk = chunk?;
             file.write_all(&chunk).await?;
             downloaded += chunk.len() as u64;
-            cb(downloaded, total);
+            cb(downloaded, total, 0, if total > 0 { (downloaded * 100 / total) as i32 } else { 0 });
         }
         Ok(())
     }
@@ -348,7 +348,7 @@ impl DownloadManager {
                 info!("重试第{}次...", attempt);
                 tokio::time::sleep(std::time::Duration::from_secs(attempt as u64 * 2)).await;
             }
-            match self.download_bilibili_once(url, path, cookies, &|_, _| {}).await {
+            match self.download_bilibili_once(url, path, cookies, &|_, _, _, _| {}).await {
                 Ok(()) => return Ok(()),
                 Err(e) => {
                     if attempt == max_retries - 1 { return Err(e); }
