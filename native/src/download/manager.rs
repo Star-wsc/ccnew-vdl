@@ -21,6 +21,9 @@ impl DownloadManager {
     pub async fn new(config: AppConfig) -> Result<Self> {
         let client = Client::builder()
             .timeout(std::time::Duration::from_secs(600))
+            .tcp_keepalive(std::time::Duration::from_secs(30))
+            .pool_max_idle_per_host(8)
+            .pool_idle_timeout(std::time::Duration::from_secs(90))
             .build()?;
         let tasks_file = PathBuf::from(&config.log_dir).join("tasks.json");
         let _ = std::fs::create_dir_all(&config.download_dir);
@@ -261,7 +264,8 @@ impl DownloadManager {
 
         let total = resp.content_length().unwrap_or(0);
         let mut stream = resp.bytes_stream();
-        let mut file = tokio::fs::File::create(path).await?;
+        let file = tokio::fs::File::create(path).await?;
+        let mut file = tokio::io::BufWriter::with_capacity(256 * 1024, file);
         use futures_util::StreamExt;
         use tokio::io::AsyncWriteExt;
         let mut downloaded: u64 = 0;
