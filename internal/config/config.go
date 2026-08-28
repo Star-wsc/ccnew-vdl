@@ -23,23 +23,6 @@ func Load() *Config {
 		LogDir:      "./logs",
 	}
 
-	// 从环境变量加载
-	if port := os.Getenv("PORT"); port != "" {
-		cfg.Port = port
-	}
-	if dir := os.Getenv("DOWNLOAD_DIR"); dir != "" {
-		cfg.DownloadDir = dir
-	}
-	if cookie := os.Getenv("BILIBILI_COOKIE"); cookie != "" {
-		cfg.BilibiliCookie = sanitizeCookie(cookie)
-	}
-	if cookie := os.Getenv("DOUYIN_COOKIE"); cookie != "" {
-		cfg.DouyinCookie = sanitizeCookie(cookie)
-	}
-	if proxy := os.Getenv("PROXY"); proxy != "" {
-		cfg.Proxy = proxy
-	}
-
 	// 从配置文件加载（优先用户目录，其次程序目录）
 	configFiles := []string{getConfigFilePath()}
 	// 检查程序所在目录的 config.json
@@ -79,6 +62,27 @@ func Load() *Config {
 				}
 			}
 		}
+	}
+
+	// 环境变量最后加载，优先级最高于配置文件
+	// （Docker 场景下 compose 中的 DOWNLOAD_DIR 等不能被 config.json 覆盖）
+	if port := os.Getenv("PORT"); port != "" {
+		cfg.Port = port
+	}
+	if dir := os.Getenv("DOWNLOAD_DIR"); dir != "" {
+		cfg.DownloadDir = dir
+	}
+	if dir := os.Getenv("LOG_DIR"); dir != "" {
+		cfg.LogDir = dir
+	}
+	if cookie := os.Getenv("BILIBILI_COOKIE"); cookie != "" {
+		cfg.BilibiliCookie = sanitizeCookie(cookie)
+	}
+	if cookie := os.Getenv("DOUYIN_COOKIE"); cookie != "" {
+		cfg.DouyinCookie = sanitizeCookie(cookie)
+	}
+	if proxy := os.Getenv("PROXY"); proxy != "" {
+		cfg.Proxy = proxy
 	}
 
 	return cfg

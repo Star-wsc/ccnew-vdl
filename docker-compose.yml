@@ -1,20 +1,30 @@
-version: '3.8'
-
 services:
   video-downloader:
     image: wsc768043912/ccnew-vdl:latest
     container_name: video-downloader
     ports:
-      - "19000:18000"
+      - "18000:18000"    # 左边端口可改（和其他程序冲突时改这个），右边18000不要动
     volumes:
-      - /vol1/1000/ls/TT:/downloads
-      - ./config:/root/.config/ccnew-vdl
-      - ./logs:/logs
+      # 左边 = 你自己的保存位置，相对路径或绝对路径都可以，按需修改
+      # 右边 = 容器内固定路径，不要动
+      - ./downloads:/downloads              # 视频保存目录
+      - ./config:/root/.config/ccnew-vdl    # Cookie等配置持久化
+      - ./logs:/logs                        # 日志和任务记录持久化
     environment:
       - PORT=18000
-      - DOWNLOAD_DIR=/downloads
-      # B站Cookie（可选，用于4K下载）
-      # - BILIBILI_COOKIE=your_cookie_here
-      # 抖音Cookie（可选）
-      # - DOUYIN_COOKIE=your_cookie_here
+      - DOWNLOAD_DIR=/downloads   # 容器内路径，不要改
+      - LOG_DIR=/logs             # 容器内路径，不要改
+      # B站Cookie（可选，4K下载需要；不填也可以部署后在网页设置里粘贴）
+      # - BILIBILI_COOKIE=你的B站Cookie
+      # 抖音Cookie（可选，未登录最高720p）
+      # - DOUYIN_COOKIE=你的抖音Cookie
     restart: unless-stopped
+
+# 使用说明：
+# 1. 群晖 / 飞牛 / Unraid / 普通Linux：直接 docker compose up -d，
+#    downloads、config、logs 会自动生成在本文件同目录下。
+# 2. 极空间：volume 左边必须写绝对路径，例如把上面三行左边分别改成：
+#      /tmp/zfsv3/sata14/public/douyindownload   （你要保存视频的共享文件夹）
+#      /tmp/zfsv3/nvme11/xxx/data/docker/dyd/config
+#      /tmp/zfsv3/nvme11/xxx/data/docker/dyd/logs
+# 3. 浏览器访问 http://NAS的IP:18000 即可使用。
