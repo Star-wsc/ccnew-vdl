@@ -142,7 +142,13 @@ func (h *Handlers) addLog(level, taskID, message string) {
 func (h *Handlers) Index(c *gin.Context) {
 	exePath, _ := os.Executable()
 	exeDir := filepath.Dir(exePath)
-	c.File(filepath.Join(exeDir, "static", "index-v2.html"))
+	staticDir := os.Getenv("STATIC_DIR")
+	if staticDir == "" {
+		staticDir = filepath.Join(exeDir, "static")
+	} else {
+		staticDir = filepath.Join(staticDir, "static")
+	}
+	c.File(filepath.Join(staticDir, "index-v2.html"))
 }
 
 // ==================== Config ====================
@@ -213,6 +219,10 @@ func (h *Handlers) SetDownloadDir(c *gin.Context) {
 // ==================== Browse Folder ====================
 
 func (h *Handlers) BrowseFolder(c *gin.Context) {
+	if runtime.GOOS != "windows" {
+		c.JSON(http.StatusNotImplemented, gin.H{"detail": "此功能仅支持Windows桌面版"})
+		return
+	}
 	script := `
 	Add-Type -AssemblyName System.Windows.Forms
 	Add-Type -AssemblyName System.Drawing
@@ -283,6 +293,10 @@ func (h *Handlers) SetBilibiliCookie(c *gin.Context) {
 }
 
 func (h *Handlers) LoginBilibili(c *gin.Context) {
+	if runtime.GOOS != "windows" {
+		c.JSON(http.StatusNotImplemented, gin.H{"detail": "扫码登录仅支持Windows桌面版，请手动粘贴Cookie"})
+		return
+	}
 	exePath, _ := os.Executable()
 	exeDir := filepath.Dir(exePath)
 	cookiePath := filepath.Join(os.TempDir(), "bilibili_cookies.txt")
@@ -853,6 +867,47 @@ func (h *Handlers) DownloadTaskFile(c *gin.Context) {
 	filename := filepath.Base(task.FilePath)
 	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s", filename))
 	c.File(task.FilePath)
+}
+
+// StreamTaskToMobile 流式输出给手机客户端，传输完成后删除服务端文件。
+// 手机下载的视频不保留在服务器上。
+func (h *Handlers) StreamTaskToMobile(c *gin.Context) {
+	taskID := c.Param("task_id")
+	task := h.mgr.GetTask(taskID)
+	if task == nil {
+		c.JSON(http.StatusNotFound, gin.H{"detail": "任务不存在"})
+		return
+	}
+	if task.Status != StatusCompleted {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "任务未完成"})
+		return
+	}
+	if task.FilePath == "" {
+		c.JSON(http.StatusNotFound, gin.H{"detail": "文件不存在"})
+		return
+	}
+	if _, err := os.Stat(task.FilePath); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"detail": "文件已被删除"})
+		return
+	}
+
+	filename := filepath.Base(task.FilePath)
+	// ASCII 安全的 filename + RFC5987 编码的 filename*
+	quoted := strings.ReplaceAll(filename, `"`, `_`)
+	c.Header("Content-Disposition",
+		fmt.Sprintf(`attachment; filename="%s"; filename*=UTF-8''%s`,
+			quoted, url.PathEscape(filename)))
+	c.Header("Content-Length", fmt.Sprintf("%d", task.FileSize))
+	c.File(task.FilePath)
+
+	// 流式传输完成后删除服务端文件（手机下载的不保留）
+	go func() {
+		// 等待响应完成
+		time.Sleep(2 * time.Second)
+		if err := os.Remove(task.FilePath); err == nil {
+			log.Printf("[移动端] 已流式传输并删除: %s", filename)
+		}
+	}()
 }
 
 // ==================== Collections ====================

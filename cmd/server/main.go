@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -23,6 +24,9 @@ var Version = "1.3.5"
 
 // killPortProcess 仅强杀同名的自身旧实例，避免误伤占用端口的其他程序。
 func killPortProcess(port string) {
+	if runtime.GOOS != "windows" {
+		return
+	}
 	cmd := exec.Command("cmd", "/c", fmt.Sprintf("netstat -ano | findstr :%s | findstr LISTENING", port))
 	output, _ := cmd.Output()
 	if len(output) == 0 {
@@ -60,6 +64,15 @@ func killPortProcess(port string) {
 		log.Printf("杀掉占用端口%s的旧实例: PID=%s", port, pid)
 		exec.Command("taskkill", "/F", "/PID", pid).Run()
 	}
+}
+
+// getStaticDir 返回静态文件目录。优先使用 STATIC_DIR 环境变量（Android 场景下
+// exeDir 是只读的 nativeLibraryDir，静态文件需放在 app 私有目录）。
+func getStaticDir(exeDir string) string {
+	if env := os.Getenv("STATIC_DIR"); env != "" {
+		return filepath.Join(env, "static")
+	}
+	return filepath.Join(exeDir, "static")
 }
 
 // cleanupStaleTempFiles 清理上次运行残留的临时分片（崩溃/断电遗留）。
@@ -139,6 +152,7 @@ func main() {
 	r.DELETE("/api/tasks/:task_id", h.DeleteTask)
 	r.POST("/api/tasks/:task_id/retry", h.RetryTask)
 	r.GET("/api/tasks/:task_id/download", h.DownloadTaskFile)
+	r.GET("/api/tasks/:task_id/stream", h.StreamTaskToMobile)
 	r.GET("/api/tasks/:task_id/proxy-download", h.ProxyDownload)
 	r.GET("/api/stats", h.GetStats)
 	r.GET("/api/logs", h.GetLogs)
@@ -164,7 +178,8 @@ func main() {
 	exePath, _ := os.Executable()
 	exeDir := filepath.Dir(exePath)
 
-	r.Static("/static", filepath.Join(exeDir, "static"))
+	staticDir := getStaticDir(exeDir)
+	r.Static("/static", staticDir)
 
 	addr := fmt.Sprintf(":%s", cfg.Port)
 	killPortProcess(cfg.Port)
