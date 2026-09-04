@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -36,6 +37,7 @@ type Task struct {
 	Author       string     `json:"author"`
 	CoverURL     string     `json:"cover_url"`
 	VideoURL     string     `json:"video_url,omitempty"`
+	AudioURL     string     `json:"audio_url,omitempty"`
 	Quality      string     `json:"quality"`
 	Platform     string     `json:"platform"`
 	Status       TaskStatus `json:"status"`
@@ -164,12 +166,15 @@ func (m *Manager) ExecuteTask(ctx context.Context, taskID string) {
 			Author:   task.Author,
 			CoverURL: task.CoverURL,
 			VideoURL: task.VideoURL,
+			AudioURL: task.AudioURL,
 			Platform: task.Platform,
 			Quality:  task.Quality,
 		}
-		// 补充音频流URL
-		if parsed, parseErr := m.parseVideo(task.URL, task.Quality); parseErr == nil && parsed != nil && parsed.AudioURL != "" {
-			videoInfo.AudioURL = parsed.AudioURL
+		// 如果预览数据没有音频URL，尝试重新解析获取
+		if videoInfo.AudioURL == "" {
+			if parsed, parseErr := m.parseVideo(task.URL, task.Quality); parseErr == nil && parsed != nil && parsed.AudioURL != "" {
+				videoInfo.AudioURL = parsed.AudioURL
+			}
 		}
 		m.updateTaskStatus(taskID, StatusDownloading, "")
 		m.saveTasks()
@@ -215,10 +220,21 @@ func (m *Manager) ExecuteTask(ctx context.Context, taskID string) {
 	m.updateTaskStatus(taskID, StatusParsing, "")
 	m.saveTasks()
 
-	// 解析视频
-	videoInfo, err := m.parseVideo(task.URL, task.Quality)
+	// 解析视频（最多重试5次，间隔3秒）
+	var videoInfo *videoInfo
+	var err error
+	for attempt := 1; attempt <= 5; attempt++ {
+		videoInfo, err = m.parseVideo(task.URL, task.Quality)
+		if err == nil {
+			break
+		}
+		if attempt < 5 {
+			log.Printf("[重试] 解析失败(第%d次): %v，3秒后重试...", attempt, err)
+			time.Sleep(3 * time.Second)
+		}
+	}
 	if err != nil {
-		m.updateTaskStatus(taskID, StatusFailed, err.Error())
+		m.updateTaskStatus(taskID, StatusFailed, fmt.Sprintf("解析失败(重试5次): %v", err))
 		m.saveTasks()
 		return
 	}
@@ -241,29 +257,45 @@ func (m *Manager) ExecuteTask(ctx context.Context, taskID string) {
 	outputPath := m.generateOutputPath(task.Title, task.Platform)
 	var lastDL2 int64
 	var lastTS2 = time.Now()
-	err = m.downloadVideo(videoInfo, outputPath, func(downloaded, total int64) {
-		m.mu.Lock()
-		if total > 0 {
-			task.Progress = int(downloaded * 100 / total)
-		} else if downloaded > 0 {
-			task.Progress = int(downloaded / (1024 * 1024))
-			if task.Progress > 99 {
-				task.Progress = 99
+	// 下载视频（最多重试5次，间隔3秒）
+	for attempt := 1; attempt <= 5; attempt++ {
+		lastDL2 = 0
+		lastTS2 = time.Now()
+		err = m.downloadVideo(videoInfo, outputPath, func(downloaded, total int64) {
+			m.mu.Lock()
+			if total > 0 {
+				task.Progress = int(downloaded * 100 / total)
+			} else if downloaded > 0 {
+				task.Progress = int(downloaded / (1024 * 1024))
+				if task.Progress > 99 {
+					task.Progress = 99
+				}
 			}
+			now := time.Now()
+			dt := now.Sub(lastTS2).Seconds()
+			if dt >= 0.5 {
+				task.Speed = int64(float64(downloaded - lastDL2) / dt)
+				lastDL2 = downloaded
+				lastTS2 = now
+			}
+			task.UpdatedAt = now
+			m.mu.Unlock()
+		})
+		if err == nil {
+			break
 		}
-		now := time.Now()
-		dt := now.Sub(lastTS2).Seconds()
-		if dt >= 0.5 {
-			task.Speed = int64(float64(downloaded - lastDL2) / dt)
-			lastDL2 = downloaded
-			lastTS2 = now
+		// 清理失败的临时文件
+		os.Remove(outputPath)
+		os.Remove(outputPath + ".video.tmp")
+		os.Remove(outputPath + ".audio.tmp")
+		if attempt < 5 {
+			log.Printf("[重试] 下载失败(第%d次): %v，3秒后重试...", attempt, err)
+			time.Sleep(3 * time.Second)
 		}
-		task.UpdatedAt = now
-		m.mu.Unlock()
-	})
+	}
 
 	if err != nil {
-		m.updateTaskStatus(taskID, StatusFailed, err.Error())
+		m.updateTaskStatus(taskID, StatusFailed, fmt.Sprintf("下载失败(重试5次): %v", err))
 		m.saveTasks()
 		return
 	}
@@ -359,7 +391,7 @@ func (m *Manager) ParseVideo(url, quality string) (map[string]interface{}, error
 		}
 	}
 
-	return map[string]interface{}{
+	result := map[string]interface{}{
 		"title":              videoInfo.Title,
 		"author":             videoInfo.Author,
 		"cover_url":          videoInfo.CoverURL,
@@ -367,7 +399,11 @@ func (m *Manager) ParseVideo(url, quality string) (map[string]interface{}, error
 		"platform":           platform,
 		"quality":            q,
 		"available_qualities": []string{"4k", "2k", "1080p", "720p", "480p"},
-	}, nil
+	}
+	if videoInfo.AudioURL != "" {
+		result["audio_url"] = videoInfo.AudioURL
+	}
+	return result, nil
 }
 
 // ParseLink 解析链接，返回单视频或合集信息
@@ -543,10 +579,62 @@ func hasAudioTrack(filePath string) bool {
 }
 
 func mergeAudioVideo(videoPath, audioPath, outputPath string) error {
-	if p, err := exec.LookPath("ffmpeg"); err == nil {
-		return exec.Command(p, "-i", videoPath, "-i", audioPath, "-c:v", "copy", "-c:a", "copy", "-y", outputPath).Run()
+	ffmpegPath, err := findFFmpegForDownload()
+	if err != nil {
+		return fmt.Errorf("FFmpeg未找到: %w", err)
 	}
-	return exec.Command("ffmpeg", "-i", videoPath, "-i", audioPath, "-c:v", "copy", "-c:a", "copy", "-y", outputPath).Run()
+	return exec.Command(ffmpegPath, "-i", videoPath, "-i", audioPath, "-c:v", "copy", "-c:a", "copy", "-y", outputPath).Run()
+}
+
+// findFFmpegForDownload 在 download 包内查找 FFmpeg，逻辑与 bilibili.findFFmpeg 一致。
+func findFFmpegForDownload() (string, error) {
+	// 1. PATH
+	if path, err := exec.LookPath("ffmpeg"); err == nil {
+		return path, nil
+	}
+	// 2. 可执行文件同级目录
+	exePath, err := os.Executable()
+	if err == nil {
+		exeDir := filepath.Dir(exePath)
+		candidates := getFFmpegCandidatesForDownload()
+		for _, name := range candidates {
+			path := filepath.Join(exeDir, name)
+			if _, err := os.Stat(path); err == nil {
+				return path, nil
+			}
+		}
+		ffmpegDir := filepath.Join(exeDir, "ffmpeg")
+		for _, name := range candidates {
+			path := filepath.Join(ffmpegDir, name)
+			if _, err := os.Stat(path); err == nil {
+				return path, nil
+			}
+		}
+	}
+	// 3. 当前目录
+	candidates := getFFmpegCandidatesForDownload()
+	for _, name := range candidates {
+		if _, err := os.Stat(name); err == nil {
+			return name, nil
+		}
+	}
+	return "", fmt.Errorf("未找到FFmpeg")
+}
+
+func getFFmpegCandidatesForDownload() []string {
+	switch runtime.GOOS {
+	case "windows":
+		return []string{"ffmpeg-windows-amd64.exe", "ffmpeg.exe"}
+	case "linux":
+		if runtime.GOARCH == "arm64" {
+			return []string{"ffmpeg-linux-arm64", "ffmpeg"}
+		}
+		return []string{"ffmpeg-linux-amd64", "ffmpeg"}
+	case "android":
+		return []string{"libffmpeg.so", "ffmpeg"}
+	default:
+		return []string{"ffmpeg"}
+	}
 }
 
 func (m *Manager) generateOutputPath(title, platform string) string {

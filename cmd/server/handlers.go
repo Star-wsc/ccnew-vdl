@@ -682,7 +682,7 @@ func (h *Handlers) CreateTask(c *gin.Context) {
 		extractedURL = req.URL
 	}
 
-	// 预览模式：解析视频信息并返回，不创建下载任务
+	// 预览模式：解析视频信息并返回，不创建下载任务（带重试）
 	if req.Quality == "preview" {
 		// 先判断是否为明确的合集URL（非短链接）
 		if douyin.IsDouyinCollectionURL(extractedURL) || bilibili.IsBilibiliCollectionURL(extractedURL) {
@@ -693,14 +693,20 @@ func (h *Handlers) CreateTask(c *gin.Context) {
 			}
 		}
 
-		// 尝试单视频解析
-		videoInfo, err := h.mgr.ParseVideo(extractedURL, "4k")
-		if err != nil {
-			// 短链接不回退到合集解析，直接报错
-			if strings.Contains(extractedURL, "v.douyin.com") || strings.Contains(extractedURL, "v.bilibili.com") || strings.Contains(extractedURL, "b23.tv") {
-				c.JSON(http.StatusBadRequest, gin.H{"detail": fmt.Sprintf("解析失败: %v", err)})
-				return
+		// 尝试单视频解析（最多重试5次，间隔3秒）
+		var videoInfo map[string]interface{}
+		var err error
+		for attempt := 1; attempt <= 5; attempt++ {
+			videoInfo, err = h.mgr.ParseVideo(extractedURL, "4k")
+			if err == nil {
+				break
 			}
+			if attempt < 5 {
+				log.Printf("[预览重试] 解析失败(第%d次): %v，3秒后重试...", attempt, err)
+				time.Sleep(3 * time.Second)
+			}
+		}
+		if err != nil {
 			// 单视频失败，尝试合集解析作为 fallback
 			colInfo, colErr := h.previewCollection(extractedURL)
 			if colErr != nil {
@@ -779,6 +785,9 @@ func (h *Handlers) CreateTaskFromPreview(c *gin.Context) {
 		}
 		if videoURL, ok := req.PreviewData["video_url"].(string); ok && videoURL != "" {
 			task.VideoURL = videoURL
+		}
+		if audioURL, ok := req.PreviewData["audio_url"].(string); ok && audioURL != "" {
+			task.AudioURL = audioURL
 		}
 		if platform, ok := req.PreviewData["platform"].(string); ok && platform != "" {
 			task.Platform = platform
