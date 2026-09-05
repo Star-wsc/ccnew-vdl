@@ -535,7 +535,7 @@ function renderCols(){
 async function openC(id){
   try{
     drawC(await api("/api/collections/"+id));
-    clearInterval(ct);ct=setInterval(async()=>{if(!$("#mroot").classList.contains("show")){clearInterval(ct);return}try{drawC(await api("/api/collections/"+id))}catch(e){}},3000);
+    clearInterval(ct);ct=setInterval(async()=>{if(PLAYING)return;if(!$("#mroot").classList.contains("show")){clearInterval(ct);return}try{drawC(await api("/api/collections/"+id))}catch(e){}},3000);
   }catch(e){toast(e.message,"err")}
 }
 function drawC(c){
@@ -558,6 +558,7 @@ function drawC(c){
       spill(v.status)+
       (vdl?'<span style="font-family:var(--mono);font-size:11px;color:var(--acc)">'+fspd(vspeed)+'</span>':'')+
       '<div style="flex:1;min-width:70px">'+((vdl||vcompleted)?'<div class="ptrk"><div class="pfl'+(vdl?" str":"")+'" style="width:'+vprogress+'%"></div></div><div class="pm"><span>'+vprogress+'%</span>'+(vdl?"<span>"+fspd(vspeed)+"</span>":"")+'</div>':'')+'</div>'+
+      (vcompleted?'<button class="ibtn" title="在线播放" onclick="playCV(\''+c.id+'\','+i+')"><svg class="ic" viewBox="0 0 24 24"><polygon points="6 3 21 12 6 21"/></svg></button>':'')+
       (vcompleted?'<button class="ibtn dg" title="删文件并重置" onclick="delF(\''+c.id+'\','+i+')"><svg class="ic" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg></button>':'')+
       ((!vdl&&!vcompleted)?'<button class="ibtn" title="单独下载" onclick="dlOne(\''+c.id+'\','+i+')"><svg class="ic" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></button>':'')+
       '</div>';
@@ -570,6 +571,10 @@ function drawC(c){
 }
 
 /* ===== 合集操作 ===== */
+var PLAYING=false; // 合集视频播放中，暂停详情弹窗的自动刷新(否则3秒重渲染会掐断播放)
+function playCV(cid,i){const col=COLS.find(x=>x.id===cid);const v=(col&&col.videos)?col.videos[i]:null;
+  PLAYING=true;
+  showModal(esc((v&&v.title)||('第'+(i+1)+'集')),'<video id="pv" src="/api/collections/'+cid+'/videos/'+i+'/file" controls autoplay style="width:100%;max-height:64vh;border-radius:10px;background:#000;outline:none"></video>','<button class="btn" onclick="closeM()">关闭</button>')}
 async function dlAll(id,quality){try{await api("/api/collections/"+id+"/download?quality="+encodeURIComponent(quality||Q),{method:"POST"});toast("合集下载已启动");refreshCols()}catch(e){toast(e.message,"err")}}
 async function dlOne(id,i){try{await api("/api/collections/"+id+"/videos/"+i+"/download",{method:"POST"});toast("单元已启动")}catch(e){toast(e.message,"err")}}
 async function delF(id,i){try{await api("/api/collections/"+id+"/videos/"+i+"/file",{method:"DELETE"});toast("文件已清除")}catch(e){toast(e.message,"err")}}
@@ -598,7 +603,7 @@ async function chkUpd(){toast("正在检查更新…");try{const r=await api("/a
 
 /* ===== 弹窗 ===== */
 function showModal(t,b,f){$("#mbox").innerHTML='<div class="mh"><h3>'+t+'</h3><button class="ibtn" onclick="closeM()"><svg class="ic" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div><div class="mb">'+b+'</div><div class="mf">'+f+"</div>";$("#mroot").classList.add("show")}
-function closeM(){const v=$("#pv");if(v){v.pause();v.removeAttribute("src");v.load()}$("#mroot").classList.remove("show");clearInterval(ct)}
+function closeM(){PLAYING=false;const v=$("#pv");if(v){v.pause();v.removeAttribute("src");v.load()}$("#mroot").classList.remove("show");clearInterval(ct)}
 function cfm(t,b,ok){showModal("<h3>"+t+"</h3>","<div style='font-size:13.5px'>"+b+"</div>",'<button class="btn" onclick="closeM()">取消</button><button class="btn danger" id="okB">确认执行</button>');$("#okB").addEventListener("click",async()=>{try{await ok()}catch(e){}closeM()})}
 
 /* ===== 初始化 ===== */
