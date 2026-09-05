@@ -28,7 +28,7 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> {
+class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   int _tab = 0;
   List<dynamic> _tasks = [];
   List<dynamic> _collections = [];
@@ -61,9 +61,9 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadCache(); // 先用手机缓存秒开列表
     _poll(); // 再与服务器对账
-    _timer = Timer.periodic(const Duration(seconds: 2), (_) => _poll());
     NativeBridge.setOnShareCallback((url) { _urlCtrl.text = url; _submit(); });
     NativeBridge.getPendingShare().then((url) { if (url != null && url.isNotEmpty) { _urlCtrl.text = url; _submit(); } });
   }
@@ -81,14 +81,59 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
+  // ===== 生命周期：后台完全停止轮询，省电省流量 =====
+  bool _foreground = true;
+  String _netType = 'wifi';
+
   @override
-  void dispose() { _timer?.cancel(); _urlCtrl.dispose(); super.dispose(); }
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      if (!_foreground) {
+        _foreground = true;
+        _poll(); // 回前台立即刷新一次
+        _scheduleNextPoll();
+      }
+    } else if (state == AppLifecycleState.paused || state == AppLifecycleState.detached) {
+      _foreground = false;
+      _timer?.cancel();
+    }
+  }
+
+  /// 自适应轮询间隔：
+  /// WiFi:  有下载任务 2s / 空闲 10s
+  /// 流量:  有下载任务 10s / 空闲 60s（省流）
+  void _scheduleNextPoll() {
+    _timer?.cancel();
+    if (!_foreground || !mounted) return;
+    final active = ((_stats['downloading'] ?? 0) as num) > 0 || _dlProgress.isNotEmpty;
+    final Duration interval;
+    if (_netType == 'cellular') {
+      interval = active ? const Duration(seconds: 10) : const Duration(seconds: 60);
+    } else {
+      interval = active ? const Duration(seconds: 2) : const Duration(seconds: 10);
+    }
+    _timer = Timer(interval, () async {
+      await _poll();
+      _scheduleNextPoll();
+    });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _timer?.cancel();
+    _urlCtrl.dispose();
+    super.dispose();
+  }
 
   Future<void> _poll() async {
+    final net = await NativeBridge.getNetworkType();
+    if (mounted) setState(() => _netType = net);
     // 先探测连通性：离线时保持本地缓存内容不动，绝不能用空数据覆盖
     final ok = await ApiService.checkConnection();
     if (!ok) {
       if (mounted) setState(() => _connected = false);
+      _scheduleNextPoll();
       return;
     }
     try {
@@ -111,6 +156,7 @@ class _HomePageState extends State<HomePage> {
       LocalStore.saveStats(_stats);
     } catch (_) { if (mounted) setState(() => _connected = false); }
     if (_tab == 2) { final l = await ApiService.getLogs(); if (mounted) setState(() => _logs = l); }
+    _scheduleNextPoll();
   }
 
   /// 从分享文字中提取 URL
@@ -367,8 +413,16 @@ class _HomePageState extends State<HomePage> {
         appBar: GlassAppBar(
           title: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text('DouBi', style: TextStyle(letterSpacing: 3)),
-            Text(_connected ? '已连接' : '未连接',
-              style: TextStyle(color: _connected ? green : red, fontSize: 11)),
+            Row(children: [
+              Text(_connected ? '已连接' : '未连接',
+                style: TextStyle(color: _connected ? green : red, fontSize: 11)),
+              if (_netType == 'cellular') ...[
+                const SizedBox(width: 6),
+                Container(padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                  decoration: BoxDecoration(color: purple.withOpacity(0.15), borderRadius: BorderRadius.circular(4)),
+                  child: Text('省流模式', style: TextStyle(color: purple, fontSize: 9))),
+              ],
+            ]),
           ]),
           actions: [
             if (_multiSelect) ...[
