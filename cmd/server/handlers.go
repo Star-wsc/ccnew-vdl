@@ -76,6 +76,7 @@ type CollectionInfo struct {
 	Videos          []*CollectionVideoInfo `json:"videos"`
 	Status          string                 `json:"status"`
 	Quality         string                 `json:"quality"`
+	Source          string                 `json:"source,omitempty"` // "app" 或 "" (web)
 	CreatedAt       time.Time              `json:"created_at"`
 	Subscribed      bool                   `json:"subscribed"`       // 是否订阅
 	SelectedIndices []int                  `json:"selected_indices"` // 用户选中的视频索引
@@ -563,7 +564,8 @@ func (h *Handlers) ProxyDownload(c *gin.Context) {
 // ==================== Stats ====================
 
 func (h *Handlers) GetStats(c *gin.Context) {
-	tasks := h.mgr.GetAllTasks()
+	sourceFilter := c.Query("source")
+	tasks := h.mgr.GetAllTasksFiltered(sourceFilter)
 	total, pending, parsing, downloading, completed, failed := 0, 0, 0, 0, 0, 0
 	for _, t := range tasks {
 		total++
@@ -665,6 +667,7 @@ func (h *Handlers) CreateTask(c *gin.Context) {
 	var req struct {
 		URL     string `json:"url"`
 		Quality string `json:"quality"`
+		Source  string `json:"source"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"detail": "无效请求"})
@@ -730,7 +733,7 @@ func (h *Handlers) CreateTask(c *gin.Context) {
 		return
 	}
 
-	task := h.mgr.CreateTask(extractedURL, req.Quality)
+	task := h.mgr.CreateTaskWithSource(extractedURL, req.Quality, req.Source)
 	go h.mgr.ExecuteTask(context.Background(), task.ID)
 
 	h.addLog("INFO", task.ID, "任务创建: "+extractedURL)
@@ -742,6 +745,7 @@ func (h *Handlers) CreateTaskFromPreview(c *gin.Context) {
 	var req struct {
 		URL         string                 `json:"url"`
 		Quality     string                 `json:"quality"`
+		Source      string                 `json:"source"`
 		PreviewData map[string]interface{} `json:"preview_data"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -770,7 +774,7 @@ func (h *Handlers) CreateTaskFromPreview(c *gin.Context) {
 		return
 	}
 
-	task := h.mgr.CreateTask(extractedURL, req.Quality)
+	task := h.mgr.CreateTaskWithSource(extractedURL, req.Quality, req.Source)
 
 	// 从预览数据中填充任务信息（避免重复解析）
 	if req.PreviewData != nil {
@@ -801,7 +805,8 @@ func (h *Handlers) CreateTaskFromPreview(c *gin.Context) {
 
 func (h *Handlers) GetTasks(c *gin.Context) {
 	statusFilter := c.Query("status")
-	tasks := h.mgr.GetAllTasks()
+	sourceFilter := c.Query("source") // "app" 或 "" (全部)
+	tasks := h.mgr.GetAllTasksFiltered(sourceFilter)
 
 	if statusFilter == "" {
 		c.JSON(http.StatusOK, tasks)
@@ -1001,6 +1006,7 @@ func (h *Handlers) CreateCollection(c *gin.Context) {
 		Title           string                   `json:"title"`
 		Videos          []map[string]interface{} `json:"videos"`
 		Quality         string                   `json:"quality"`
+		Source          string                   `json:"source"`
 		AutoDownload    bool                     `json:"auto_download"`
 		SelectedIndices []int                    `json:"selected_indices"` // 选中要下载的视频索引
 	}
@@ -1054,6 +1060,7 @@ func (h *Handlers) CreateCollection(c *gin.Context) {
 		Videos:          videos,
 		Status:          "pending",
 		Quality:         req.Quality,
+		Source:          req.Source,
 		CreatedAt:       time.Now(),
 		SelectedIndices: req.SelectedIndices,
 		RefreshInterval: 60, // 默认60分钟刷新间隔
@@ -1329,12 +1336,15 @@ func (h *Handlers) downloadSelectedCollectionVideos(colID string, indices []int,
 }
 
 func (h *Handlers) GetCollections(c *gin.Context) {
+	sourceFilter := c.Query("source")
 	h.collectionsMu.RLock()
 	defer h.collectionsMu.RUnlock()
 
 	cols := make([]*CollectionInfo, 0, len(h.collections))
 	for _, col := range h.collections {
-		cols = append(cols, col)
+		if sourceFilter == "" || col.Source == sourceFilter {
+			cols = append(cols, col)
+		}
 	}
 	sort.Slice(cols, func(i, j int) bool {
 		return cols[i].CreatedAt.After(cols[j].CreatedAt)
@@ -1425,7 +1435,14 @@ func (h *Handlers) DeleteCollectionVideo(c *gin.Context) {
 
 	for _, col := range h.collections {
 		for i, v := range col.Videos {
-			if v.VideoID == videoID {
+			// VideoID(抖音)或BVID(B站)均可匹配
+			if v.VideoID == videoID || (videoID != "" && v.BVID == videoID) {
+				// 同时删除已下载的本地文件
+				if v.FilePath != "" {
+					if err := os.Remove(v.FilePath); err == nil {
+						log.Printf("[合集] 已删除视频文件: %s", v.FilePath)
+					}
+				}
 				col.Videos = append(col.Videos[:i], col.Videos[i+1:]...)
 				col.TotalCount = len(col.Videos)
 				c.JSON(http.StatusOK, gin.H{"message": "视频已删除"})
@@ -1434,6 +1451,36 @@ func (h *Handlers) DeleteCollectionVideo(c *gin.Context) {
 		}
 	}
 	c.JSON(http.StatusNotFound, gin.H{"detail": "视频不存在"})
+}
+
+// PlayCollectionVideoFile 在线播放合集中的已下载视频（流式，不删文件）
+func (h *Handlers) PlayCollectionVideoFile(c *gin.Context) {
+	colID := c.Param("id")
+	idx := 0
+	fmt.Sscanf(c.Param("idx"), "%d", &idx)
+
+	h.collectionsMu.RLock()
+	col, exists := h.collections[colID]
+	var filePath string
+	if exists && idx >= 0 && idx < len(col.Videos) {
+		filePath = col.Videos[idx].FilePath
+	}
+	h.collectionsMu.RUnlock()
+
+	if !exists {
+		c.JSON(http.StatusNotFound, gin.H{"detail": "合集不存在"})
+		return
+	}
+	if filePath == "" {
+		c.JSON(http.StatusNotFound, gin.H{"detail": "视频未下载"})
+		return
+	}
+	if _, err := os.Stat(filePath); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"detail": "文件已被删除"})
+		return
+	}
+	c.Header("Content-Type", "video/mp4")
+	c.File(filePath)
 }
 
 // DownloadCollectionVideo 下载合集中的单个视频
@@ -1608,6 +1655,10 @@ func (h *Handlers) downloadCollectionVideos(colID, quality string) {
 			}
 		}
 		h.collectionsMu.Unlock()
+		// 持久化合集状态（否则重启后回退到pending，丢文件路径）
+		if err := h.saveCollections(); err != nil {
+			log.Printf("[ERROR] %s: 保存合集状态失败: %v", colID, err)
+		}
 		h.addLog("INFO", colID, fmt.Sprintf("合集下载完成: %s, 状态: %s", col.Title, col.Status))
 	}()
 }

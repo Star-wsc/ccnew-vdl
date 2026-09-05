@@ -171,6 +171,7 @@ func main() {
 	r.DELETE("/api/collections/:id", h.DeleteCollection)
 	r.DELETE("/api/collections/videos/:id", h.DeleteCollectionVideo)
 	r.POST("/api/collections/:id/videos/:idx/download", h.DownloadCollectionVideo)
+	r.GET("/api/collections/:id/videos/:idx/file", h.PlayCollectionVideoFile)
 	r.DELETE("/api/collections/:id/videos/:idx/file", h.DeleteCollectionVideoFile)
 	r.POST("/api/collections/:id/subscribe", h.ToggleCollectionSubscribe)
 
