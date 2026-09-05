@@ -40,6 +40,7 @@ type Task struct {
 	AudioURL     string     `json:"audio_url,omitempty"`
 	Quality      string     `json:"quality"`
 	Platform     string     `json:"platform"`
+	Source       string     `json:"source,omitempty"` // "app" 或 "" (web)
 	Status       TaskStatus `json:"status"`
 	Progress     int        `json:"progress"`
 	Speed        int64      `json:"speed"`
@@ -59,6 +60,15 @@ type Manager struct {
 	tasks            map[string]*Task
 	tasksFile        string
 	mu               sync.RWMutex
+	// OnTaskEvent 任务状态事件钩子（纯日志可观测性，不影响核心流程），由 handlers 注入
+	OnTaskEvent func(level, taskID, msg string)
+}
+
+// emit 向钩子发事件（钩子为空时静默跳过）
+func (m *Manager) emit(level, taskID, format string, args ...interface{}) {
+	if m.OnTaskEvent != nil {
+		m.OnTaskEvent(level, taskID, fmt.Sprintf(format, args...))
+	}
 }
 
 func NewManager(cfg *config.Config) *Manager {
@@ -135,10 +145,16 @@ func (m *Manager) saveTasks() {
 
 // CreateTask 创建下载任务
 func (m *Manager) CreateTask(url, quality string) *Task {
+	return m.CreateTaskWithSource(url, quality, "")
+}
+
+// CreateTaskWithSource 创建带来源标记的任务
+func (m *Manager) CreateTaskWithSource(url, quality, source string) *Task {
 	task := &Task{
 		ID:        generateID(),
 		URL:       url,
 		Quality:   quality,
+		Source:    source,
 		Status:    StatusPending,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
@@ -178,6 +194,7 @@ func (m *Manager) ExecuteTask(ctx context.Context, taskID string) {
 		}
 		m.updateTaskStatus(taskID, StatusDownloading, "")
 		m.saveTasks()
+		m.emit("INFO", taskID, "开始下载: %s (%s/%s)", task.Title, task.Platform, task.Quality)
 		outputPath := m.generateOutputPath(task.Title, task.Platform)
 		var lastDL int64
 		var lastTS = time.Now()
@@ -202,6 +219,7 @@ func (m *Manager) ExecuteTask(ctx context.Context, taskID string) {
 		if err != nil {
 			m.updateTaskStatus(taskID, StatusFailed, err.Error())
 			m.saveTasks()
+			m.emit("ERROR", taskID, "下载失败: %s (%v)", task.Title, err)
 			return
 		}
 		fileInfo, _ := os.Stat(outputPath)
@@ -214,6 +232,7 @@ func (m *Manager) ExecuteTask(ctx context.Context, taskID string) {
 		task.UpdatedAt = time.Now()
 		m.mu.Unlock()
 		m.saveTasks()
+		m.emit("INFO", taskID, "下载完成: %s (%s)", task.Title, humanSize(fileInfo))
 		return
 	}
 
@@ -236,6 +255,7 @@ func (m *Manager) ExecuteTask(ctx context.Context, taskID string) {
 	if err != nil {
 		m.updateTaskStatus(taskID, StatusFailed, fmt.Sprintf("解析失败(重试5次): %v", err))
 		m.saveTasks()
+		m.emit("ERROR", taskID, "解析失败: %v", err)
 		return
 	}
 
@@ -249,10 +269,12 @@ func (m *Manager) ExecuteTask(ctx context.Context, taskID string) {
 	task.Quality = videoInfo.Quality // 使用实际下载的画质
 	task.UpdatedAt = time.Now()
 	m.mu.Unlock()
+	m.emit("INFO", taskID, "解析完成: %s [%s %s]", videoInfo.Title, videoInfo.Platform, videoInfo.Quality)
 
 	// 下载视频
 	m.updateTaskStatus(taskID, StatusDownloading, "")
 	m.saveTasks()
+	m.emit("INFO", taskID, "开始下载: %s (%s/%s)", task.Title, task.Platform, task.Quality)
 
 	outputPath := m.generateOutputPath(task.Title, task.Platform)
 	var lastDL2 int64
@@ -297,6 +319,7 @@ func (m *Manager) ExecuteTask(ctx context.Context, taskID string) {
 	if err != nil {
 		m.updateTaskStatus(taskID, StatusFailed, fmt.Sprintf("下载失败(重试5次): %v", err))
 		m.saveTasks()
+		m.emit("ERROR", taskID, "下载失败: %s (%v)", task.Title, err)
 		return
 	}
 
@@ -314,6 +337,19 @@ func (m *Manager) ExecuteTask(ctx context.Context, taskID string) {
 	m.mu.Unlock()
 
 	m.saveTasks()
+	m.emit("INFO", taskID, "下载完成: %s (%s)", task.Title, humanSize(fileInfo))
+}
+
+// humanSize 字节数转可读字符串
+func humanSize(fi os.FileInfo) string {
+	if fi == nil { return "未知大小" }
+	b := fi.Size()
+	switch {
+	case b >= 1<<30: return fmt.Sprintf("%.2f GB", float64(b)/(1<<30))
+	case b >= 1<<20: return fmt.Sprintf("%.1f MB", float64(b)/(1<<20))
+	case b >= 1<<10: return fmt.Sprintf("%.0f KB", float64(b)/(1<<10))
+	default: return fmt.Sprintf("%d B", b)
+	}
 }
 
 // GetTask 获取任务
@@ -325,15 +361,26 @@ func (m *Manager) GetTask(taskID string) *Task {
 
 // GetAllTasks 获取所有任务（按创建时间倒序排列，最新的在前面）
 func (m *Manager) GetAllTasks() []*Task {
+	return m.GetAllTasksFiltered("")
+}
+
+// GetAllTasksFiltered 按来源过滤任务，source="" 返回全部
+func (m *Manager) GetAllTasksFiltered(source string) []*Task {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	tasks := make([]*Task, 0, len(m.tasks))
 	for _, task := range m.tasks {
-		tasks = append(tasks, task)
+		if source == "" {
+			// 无source参数(Web端)：排除APP的单视频任务(两端隔离)，合集不受影响
+			if task.Source != "app" {
+				tasks = append(tasks, task)
+			}
+		} else if task.Source == source {
+			tasks = append(tasks, task)
+		}
 	}
 
-	// 按创建时间倒序排列（最新的在前面）
 	sort.Slice(tasks, func(i, j int) bool {
 		return tasks[i].CreatedAt.After(tasks[j].CreatedAt)
 	})

@@ -456,6 +456,8 @@ function taskCover(cover,platform){
   return'<div class="tcov">'+(cover?'<img src="'+pimg(cover)+'" alt="" loading="lazy">':'<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:var(--faint);font-size:11px">暂无封面</div>')+plat(platform)+'</div>';
 }
 function taskActionsRetry(id){return'<button class="ibtn" title="重试" onclick="retry(\''+id+'\')"><svg class="ic" viewBox="0 0 24 24"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"/><path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14"/></svg></button>'}
+function taskActionsPlay(id){return'<button class="ibtn" title="在线播放" onclick="event.stopPropagation();playT(\''+id+'\')"><svg class="ic" viewBox="0 0 24 24"><polygon points="6 3 21 12 6 21"/></svg></button>'}
+function playT(id){const t=TASKS.find(x=>x.id===id);showModal(esc((t&&t.title)||'在线播放'),'<video id="pv" src="/api/tasks/'+id+'/play" controls autoplay style="width:100%;max-height:64vh;border-radius:10px;background:#000;outline:none"></video>','<button class="btn" onclick="closeM()">关闭</button>')}
 function taskActionsDownload(id){return'<a class="ibtn" title="取回文件" href="/api/tasks/'+id+'/download"><svg class="ic" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></a>'}
 function taskActionsDelete(id){return'<button class="ibtn dg" title="删除" onclick="delT(\''+id+'\')"><svg class="ic" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2v2"/></svg></button>'}
 function progressBar(progress,speed,active){
@@ -475,7 +477,7 @@ function renderTasks(){
   /* 单任务卡片 */
   TASKS.forEach(t=>{
     const dl=t.status==="downloading",a=taskAggregate(t);
-    const actions=(t.status==="failed"?taskActionsRetry(t.id):"")+(t.status==="completed"?taskActionsDownload(t.id):"")+taskActionsDelete(t.id);
+    const actions=(t.status==="failed"?taskActionsRetry(t.id):"")+(t.status==="completed"?(taskActionsPlay(t.id)+taskActionsDownload(t.id)):"")+taskActionsDelete(t.id);
     const checked=SEL.has(t.id);
     cards.push('<article class="tcard glass hoverable'+(checked?' sel':'')+'" data-tid="'+t.id+'"><label class="tchk" onclick="event.stopPropagation()"><input type="checkbox"'+(checked?' checked':'')+' data-sid="'+t.id+'"></label>'+taskCover(t.cover_url,t.platform)+
       '<div class="tm"><div class="tt">'+(t.title?esc(t.title):'<i style="color:var(--faint)">解析中 …</i>')+'</div><div class="tv">'+plat(t.platform)+spill(t.status)+
@@ -596,7 +598,7 @@ async function chkUpd(){toast("正在检查更新…");try{const r=await api("/a
 
 /* ===== 弹窗 ===== */
 function showModal(t,b,f){$("#mbox").innerHTML='<div class="mh"><h3>'+t+'</h3><button class="ibtn" onclick="closeM()"><svg class="ic" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div><div class="mb">'+b+'</div><div class="mf">'+f+"</div>";$("#mroot").classList.add("show")}
-function closeM(){$("#mroot").classList.remove("show");clearInterval(ct)}
+function closeM(){const v=$("#pv");if(v){v.pause();v.removeAttribute("src");v.load()}$("#mroot").classList.remove("show");clearInterval(ct)}
 function cfm(t,b,ok){showModal("<h3>"+t+"</h3>","<div style='font-size:13.5px'>"+b+"</div>",'<button class="btn" onclick="closeM()">取消</button><button class="btn danger" id="okB">确认执行</button>');$("#okB").addEventListener("click",async()=>{try{await ok()}catch(e){}closeM()})}
 
 /* ===== 初始化 ===== */

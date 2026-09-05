@@ -2,7 +2,7 @@ name: ccnew_vdl
 description: "CCNEW Video Downloader - Mobile Client"
 publish_to: 'none'
 
-version: 1.5.0+2
+version: 1.5.0+3
 
 environment:
   sdk: ^3.5.4

@@ -126,7 +126,6 @@ func (h *Handlers) addLog(level, taskID, message string) {
 	log.Printf("[%s] %s: %s", level, taskID, message)
 
 	h.logsMu.Lock()
-	defer h.logsMu.Unlock()
 	h.logs = append(h.logs, LogEntry{
 		Timestamp: time.Now().Format("2006-01-02 15:04:05"),
 		Level:     level,
@@ -136,6 +135,45 @@ func (h *Handlers) addLog(level, taskID, message string) {
 	if len(h.logs) > 1000 {
 		h.logs = h.logs[len(h.logs)-1000:]
 	}
+	logs := make([]LogEntry, len(h.logs))
+	copy(logs, h.logs)
+	h.logsMu.Unlock()
+
+	h.saveOperationLogs(logs)
+}
+
+// operationLogsPath 操作日志持久化文件
+func (h *Handlers) operationLogsPath() string {
+	return filepath.Join(h.cfg.LogDir, "operation.json")
+}
+
+// saveOperationLogs 操作日志落盘（重启不丢）
+func (h *Handlers) saveOperationLogs(logs []LogEntry) {
+	data, err := json.Marshal(logs)
+	if err != nil {
+		return
+	}
+	tmp := h.operationLogsPath() + ".tmp"
+	if err := os.WriteFile(tmp, data, 0644); err != nil {
+		return
+	}
+	os.Rename(tmp, h.operationLogsPath())
+}
+
+// loadOperationLogs 启动时恢复操作日志
+func (h *Handlers) loadOperationLogs() {
+	data, err := os.ReadFile(h.operationLogsPath())
+	if err != nil {
+		return // 文件不存在则跳过
+	}
+	var logs []LogEntry
+	if err := json.Unmarshal(data, &logs); err != nil {
+		return
+	}
+	h.logsMu.Lock()
+	h.logs = logs
+	h.logsMu.Unlock()
+	log.Printf("[INFO] 已恢复 %d 条操作日志", len(logs))
 }
 
 // ==================== Index ====================
@@ -882,6 +920,30 @@ func (h *Handlers) DownloadTaskFile(c *gin.Context) {
 	}
 	filename := filepath.Base(task.FilePath)
 	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s", filename))
+	c.File(task.FilePath)
+}
+
+// PlayTaskFile Web在线播放（内联输出，无attachment头，支持Range拖动）
+func (h *Handlers) PlayTaskFile(c *gin.Context) {
+	taskID := c.Param("task_id")
+	task := h.mgr.GetTask(taskID)
+	if task == nil {
+		c.JSON(http.StatusNotFound, gin.H{"detail": "任务不存在"})
+		return
+	}
+	if task.Status != StatusCompleted {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "任务未完成"})
+		return
+	}
+	if task.FilePath == "" {
+		c.JSON(http.StatusNotFound, gin.H{"detail": "文件不存在"})
+		return
+	}
+	if _, err := os.Stat(task.FilePath); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"detail": "文件已被删除"})
+		return
+	}
+	c.Header("Content-Type", "video/mp4")
 	c.File(task.FilePath)
 }
 

@@ -102,11 +102,7 @@ class _PlayerPageState extends State<PlayerPage> {
                       colors: [Colors.black.withOpacity(0.8), Colors.transparent]),
                   ),
                   child: Column(children: [
-                    VideoProgressIndicator(_controller, allowScrubbing: true,
-                      colors: const VideoProgressColors(
-                        playedColor: Color(0xFF6EE7B7),
-                        bufferedColor: Color(0xFF1E3A5F),
-                        backgroundColor: Color(0xFF1E293B))),
+                    _Seekbar(controller: _controller),
                     const SizedBox(height: 4),
                     Row(children: [
                       Text(_fmt(_controller.value.position), style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12)),
@@ -127,6 +123,84 @@ class _PlayerPageState extends State<PlayerPage> {
               ),
           ]),
         ),
+      ),
+    );
+  }
+}
+
+/// 自定义可拖进度条：支持点按跳转和拖动粗调，拖动中暂停跟随、松手定位
+class _Seekbar extends StatefulWidget {
+  final VideoPlayerController controller;
+  const _Seekbar({required this.controller});
+  @override
+  State<_Seekbar> createState() => _SeekbarState();
+}
+
+class _SeekbarState extends State<_Seekbar> {
+  double? _dragValue; // 拖动中的临时进度(0-1)，null=跟随播放
+
+  double _positionFraction() {
+    final dur = widget.controller.value.duration.inMilliseconds;
+    if (dur <= 0) return 0;
+    return (_dragValue ?? widget.controller.value.position.inMilliseconds / dur).clamp(0.0, 1.0);
+  }
+
+  void _seekTo(double fraction) {
+    final dur = widget.controller.value.duration.inMilliseconds;
+    if (dur <= 0) return;
+    widget.controller.seekTo(Duration(milliseconds: (fraction * dur).round()));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final played = Color(0xFF6EE7B7);
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      // 点按直接跳转
+      onTapUp: (d) {
+        final box = context.findRenderObject() as RenderBox;
+        final f = (d.localPosition.dx / box.size.width).clamp(0.0, 1.0);
+        _seekTo(f);
+      },
+      // 拖动粗调（拖动中不频繁seek，松手才定位）
+      onHorizontalDragStart: (_) => setState(() => _dragValue = _positionFraction()),
+      onHorizontalDragUpdate: (d) {
+        final box = context.findRenderObject() as RenderBox;
+        setState(() {
+          _dragValue = ((_dragValue ?? 0) + d.delta.dx / box.size.width).clamp(0.0, 1.0);
+        });
+      },
+      onHorizontalDragEnd: (_) {
+        if (_dragValue != null) _seekTo(_dragValue!);
+        setState(() => _dragValue = null);
+      },
+      child: Container(
+        // 扩大触摸热区
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        child: Column(children: [
+          Stack(alignment: Alignment.centerLeft, children: [
+            // 底轨
+            Container(height: 4, decoration: BoxDecoration(
+              color: const Color(0xFF1E293B), borderRadius: BorderRadius.circular(2))),
+            // 已播放
+            LayoutBuilder(builder: (ctx, box) {
+              final w = box.maxWidth * _positionFraction();
+              return Container(height: 4, width: w,
+                decoration: BoxDecoration(color: played, borderRadius: BorderRadius.circular(2)));
+            }),
+            // 拖柄（拖动中放大）
+            LayoutBuilder(builder: (ctx, box) {
+              final w = box.maxWidth * _positionFraction();
+              final dragging = _dragValue != null;
+              return Transform.translate(
+                offset: Offset(w - (dragging ? 9 : 7), 0),
+                child: Container(width: dragging ? 18 : 14, height: dragging ? 18 : 14,
+                  decoration: BoxDecoration(color: played, shape: BoxShape.circle,
+                    boxShadow: [BoxShadow(color: played.withOpacity(0.4), blurRadius: dragging ? 10 : 6)])),
+              );
+            }),
+          ]),
+        ]),
       ),
     );
   }

@@ -119,6 +119,12 @@ func main() {
 	mgr := download.NewManager(cfg)
 	h := NewHandlers(cfg, mgr)
 
+	// 任务状态事件 → 操作日志（下载开始/完成/失败等）
+	mgr.OnTaskEvent = h.addLog
+
+	// 恢复持久化的操作日志（重启不丢）
+	h.loadOperationLogs()
+
 	// 加载持久化的合集数据
 	if err := h.loadCollections(); err != nil {
 		log.Printf("[WARN] 加载合集数据失败: %v", err)
@@ -152,6 +158,7 @@ func main() {
 	r.DELETE("/api/tasks/:task_id", h.DeleteTask)
 	r.POST("/api/tasks/:task_id/retry", h.RetryTask)
 	r.GET("/api/tasks/:task_id/download", h.DownloadTaskFile)
+	r.GET("/api/tasks/:task_id/play", h.PlayTaskFile)
 	r.GET("/api/tasks/:task_id/stream", h.StreamTaskToMobile)
 	r.GET("/api/tasks/:task_id/proxy-download", h.ProxyDownload)
 	r.GET("/api/stats", h.GetStats)
