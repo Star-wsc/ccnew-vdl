@@ -168,3 +168,28 @@ jobs:
           tags: |
             wsc768043912/ccnew-vdl:latest
             wsc768043912/ccnew-vdl:${{ steps.version.outputs.VERSION }}
+
+      - name: Sync Docker Hub README
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          jq -n --arg d "DouBi 视频下载器(Docker版) - 抖音/B站视频与合集批量下载, Web控制台在线播放, 多架构镜像" \
+            --rawfile f DOCKERHUB.md \
+            '{description: $d, full_description: $f}' > hub_payload.json
+          sync_desc() {
+            curl -s -o /dev/null -w "%{http_code}" -X PATCH \
+              -H "Authorization: Bearer $1" \
+              -H "Content-Type: application/json" \
+              -d @hub_payload.json \
+              "https://hub.docker.com/v2/repositories/wsc768043912/ccnew-vdl/"
+          }
+          code=$(sync_desc "${{ secrets.DOCKERHUB_TOKEN }}")
+          if [ "$code" != "200" ]; then
+            # token可能是账号密码，走JWT登录流程重试
+            jwt=$(curl -s -X POST -H "Content-Type: application/json" \
+              -d '{"username":"wsc768043912","password":"${{ secrets.DOCKERHUB_TOKEN }}"}' \
+              https://hub.docker.com/v2/users/login | jq -r '.token // empty')
+            if [ -n "$jwt" ]; then
+              code=$(sync_desc "$jwt")
+            fi
+          fi
+          echo "Docker Hub README sync HTTP $code"
