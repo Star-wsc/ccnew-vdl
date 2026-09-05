@@ -433,6 +433,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                   decoration: BoxDecoration(color: purple.withOpacity(0.15), borderRadius: BorderRadius.circular(4)),
                   child: Text('省流模式', style: TextStyle(color: purple, fontSize: 9))),
               ],
+              // 总下载速度（服务器全局速度）
+              if (((_stats['global_speed'] ?? 0) as num) > 0) ...[
+                const SizedBox(width: 8),
+                Icon(Icons.arrow_downward_rounded, color: green, size: 11),
+                Text(_fmtSpeed(((_stats['global_speed'] ?? 0) as num).toInt()),
+                  style: TextStyle(color: green, fontSize: 11, fontWeight: FontWeight.w600)),
+              ],
             ]),
           ]),
           actions: [
@@ -749,7 +756,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                   alignment: Alignment.center,
                   child: Text(
                     platform == 'bilibili' ? 'B' : 'D',
-                    style: TextStyle(color: text1, fontSize: 12, fontWeight: FontWeight.w900),
+                    style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w900),
                   ),
                 )),
               // 已保存角标
