@@ -161,6 +161,17 @@ func (p *CollectionParser) parseVideoCollection(urlStr, bvid string) (*ParsedCol
 }
 
 func (p *CollectionParser) ParseCollection(urlStr string) (*models.CollectionInfo, error) {
+	// 短链接(b23.tv)先跟随跳转拿到真实URL
+	if strings.Contains(urlStr, "b23.tv") {
+		resolved, err := ResolveShortURL(urlStr)
+		if err == nil && resolved != "" {
+			log.Printf("[B站合集] 短链接解析为: %s", resolved)
+			urlStr = resolved
+		} else {
+			log.Printf("[B站合集] 短链接解析失败: %v", err)
+		}
+	}
+
 	parsedURL, err := p.ParseCollectionURL(urlStr)
 	if err != nil {
 		return nil, err

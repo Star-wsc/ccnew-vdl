@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -42,6 +43,17 @@ type VideoInfo struct {
 }
 
 func (p *Parser) Parse(url string, quality string) (*VideoInfo, error) {
+	// 短链接(b23.tv)先跟随跳转拿到真实URL
+	if strings.Contains(url, "b23.tv") {
+		resolved, err := ResolveShortURL(url)
+		if err == nil && resolved != "" {
+			log.Printf("[B站] 短链接解析为: %s", resolved)
+			url = resolved
+		} else {
+			log.Printf("[B站] 短链接解析失败: %v", err)
+		}
+	}
+
 	bvid := extractBVID(url)
 	if bvid == "" {
 		return nil, fmt.Errorf("无法提取BVID: %s", url)
@@ -63,6 +75,32 @@ func (p *Parser) Parse(url string, quality string) (*VideoInfo, error) {
 	info.AudioURLs = audioURLs
 	info.Quality = qualityName(actualQn)
 	return info, nil
+}
+
+// ResolveShortURL 跟随 b23.tv 短链接跳转，返回真实视频URL
+func ResolveShortURL(shortURL string) (string, error) {
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse // 不自动跟随，手动拿Location
+		},
+	}
+	req, err := http.NewRequest("GET", shortURL, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	io.Copy(io.Discard, resp.Body)
+	location := resp.Header.Get("Location")
+	if location == "" {
+		return "", fmt.Errorf("短链接无跳转地址")
+	}
+	return location, nil
 }
 
 func extractBVID(url string) string {
