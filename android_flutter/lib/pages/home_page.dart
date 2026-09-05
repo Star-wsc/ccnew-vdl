@@ -63,7 +63,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _loadCache(); // 先用手机缓存秒开列表
-    _poll(); // 再与服务器对账
+    _refresh(force: true); // 再与服务器对账
+    _armStandingTimer();
     NativeBridge.setOnShareCallback((url) { _urlCtrl.text = url; _submit(); });
     NativeBridge.getPendingShare().then((url) { if (url != null && url.isNotEmpty) { _urlCtrl.text = url; _submit(); } });
   }
@@ -81,17 +82,25 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     });
   }
 
-  // ===== 生命周期：后台完全停止轮询，省电省流量 =====
+  // ===== 数据刷新策略：本地为准 + 事件驱动 + 低频兜底 =====
+  // - 列表读手机缓存，秒开
+  // - 切换菜单 → 刷新当前菜单（受1分钟CD约束）
+  // - 页内操作(创建/删除/下载等) → 立即刷新（绕过CD）
+  // - 常驻兜底轮询：5分钟一次
+  // - 后台完全停止
   bool _foreground = true;
   String _netType = 'wifi';
+  DateTime _lastRefresh = DateTime.fromMillisecondsSinceEpoch(0);
+  static const _refreshCD = Duration(minutes: 1);
+  static const _standingInterval = Duration(minutes: 5);
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       if (!_foreground) {
         _foreground = true;
-        _poll(); // 回前台立即刷新一次
-        _scheduleNextPoll();
+        _refresh(force: true); // 回前台立即刷新一次
+        _armStandingTimer();
       }
     } else if (state == AppLifecycleState.paused || state == AppLifecycleState.detached) {
       _foreground = false;
@@ -99,22 +108,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     }
   }
 
-  /// 自适应轮询间隔：
-  /// WiFi:  有下载任务 2s / 空闲 10s
-  /// 流量:  有下载任务 10s / 空闲 60s（省流）
-  void _scheduleNextPoll() {
+  /// 常驻兜底轮询：5分钟一次，仅前台运行
+  void _armStandingTimer() {
     _timer?.cancel();
     if (!_foreground || !mounted) return;
-    final active = ((_stats['downloading'] ?? 0) as num) > 0 || _dlProgress.isNotEmpty;
-    final Duration interval;
-    if (_netType == 'cellular') {
-      interval = active ? const Duration(seconds: 10) : const Duration(seconds: 60);
-    } else {
-      interval = active ? const Duration(seconds: 2) : const Duration(seconds: 10);
-    }
-    _timer = Timer(interval, () async {
-      await _poll();
-      _scheduleNextPoll();
+    _timer = Timer(_standingInterval, () async {
+      await _refresh();
+      _armStandingTimer();
     });
   }
 
@@ -126,18 +126,23 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     super.dispose();
   }
 
-  Future<void> _poll() async {
+  /// 拉取服务器数据。
+  /// force=true: 用户操作触发，绕过CD
+  /// force=false: 切菜单/兜底触发，1分钟内不重复请求
+  Future<void> _refresh({bool force = false}) async {
+    if (!_foreground || !mounted) return;
+    if (!force && DateTime.now().difference(_lastRefresh) < _refreshCD) return;
+    _lastRefresh = DateTime.now();
+
     final net = await NativeBridge.getNetworkType();
     if (mounted) setState(() => _netType = net);
     // 先探测连通性：离线时保持本地缓存内容不动，绝不能用空数据覆盖
     final ok = await ApiService.checkConnection();
     if (!ok) {
       if (mounted) setState(() => _connected = false);
-      _scheduleNextPoll();
       return;
     }
     try {
-      // 合集始终轮询，保证任意页面创建/状态变化即时可见
       final results = await Future.wait([
         ApiService.getStats(),
         ApiService.getTasks(),
@@ -156,7 +161,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       LocalStore.saveStats(_stats);
     } catch (_) { if (mounted) setState(() => _connected = false); }
     if (_tab == 2) { final l = await ApiService.getLogs(); if (mounted) setState(() => _logs = l); }
-    _scheduleNextPoll();
   }
 
   /// 从分享文字中提取 URL
@@ -203,7 +207,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       await ApiService.createCollection(col, selectedIndices: indices?.cast<int>());
     }
     // 立即刷新，不等下一轮轮询
-    _poll();
+    _refresh(force: true); // 操作后立即刷新
   }
 
   Future<void> _downloadToGallery(dynamic task) async {
@@ -457,14 +461,14 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 onPressed: () => setState(() => _multiSelect = true)),
               const SizedBox(width: 4),
               GlassIconButton(icon: Icons.settings_rounded,
-                onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsPage())).then((_) => _poll())),
+                onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsPage())).then((_) => _refresh(force: true))),
             ],
             const SizedBox(width: 8),
           ],
         ),
         bottomNavigationBar: GlassBottomNav(
           currentIndex: _tab,
-          onTap: (i) => setState(() => _tab = i),
+          onTap: (i) { setState(() => _tab = i); _refresh(); }, // 切菜单刷新当前菜单(受CD约束)
           items: const [
             GlassNavItem(icon: Icons.home_rounded, label: '任务'),
             GlassNavItem(icon: Icons.collections_bookmark_rounded, label: '合集'),
@@ -995,7 +999,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   /// 切换合集订阅
   Future<void> _toggleSubscribe(String colId, bool current) async {
     await ApiService.toggleCollectionSubscribe(colId, !current);
-    _poll();
+    _refresh(force: true); // 操作后立即刷新
   }
 
   /// 删除合集确认
@@ -1017,7 +1021,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       ),
     );
     if (confirmed == true) await ApiService.deleteCollection(colId);
-    _poll();
+    _refresh(force: true); // 操作后立即刷新
   }
 
   /// 删除合集内单个视频确认
@@ -1039,7 +1043,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       ),
     );
     if (confirmed == true) await ApiService.deleteCollectionVideo(videoId);
-    _poll();
+    _refresh(force: true); // 操作后立即刷新
   }
 
   // ===== 日志页 =====
