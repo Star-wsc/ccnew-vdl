@@ -9,8 +9,6 @@ Add-Type -AssemblyName WindowsBase
 
 $coreDll = 'D:\coderom\CCNEW-VideoDownloader\webview2\Microsoft.Web.WebView2.Core.dll'
 $wpfDll = 'D:\coderom\CCNEW-VideoDownloader\webview2\Microsoft.Web.WebView2.Wpf.dll'
-"CoreDll: $coreDll (exists: $(Test-Path $coreDll))" | Out-File $logFile -Append
-"WpfDll: $wpfDll (exists: $(Test-Path $wpfDll))" | Out-File $logFile -Append
 
 if (-not (Test-Path $wpfDll)) {
     "WebView2 not found" | Out-File $logFile -Append
@@ -19,17 +17,9 @@ if (-not (Test-Path $wpfDll)) {
 
 try {
     Add-Type -Path $coreDll
-    "Loaded core DLL" | Out-File $logFile -Append
-} catch {
-    "Failed to load core DLL: $_" | Out-File $logFile -Append
-    exit 1
-}
-
-try {
     Add-Type -Path $wpfDll
-    "Loaded wpf DLL" | Out-File $logFile -Append
 } catch {
-    "Failed to load wpf DLL: $_" | Out-File $logFile -Append
+    "Failed to load DLL: $_" | Out-File $logFile -Append
     exit 1
 }
 
@@ -107,14 +97,9 @@ Add-Type -TypeDefinition $csCode -ReferencedAssemblies @(
 )
 
 try {
-    "Creating window..." | Out-File $logFile -Append
-    $window = [WindowCreator]::Create('http://127.0.0.1:18000', 'CCNEW Video Downloader')
-    "Window created" | Out-File $logFile -Append
-
+    $window = [WindowCreator]::Create('http://127.0.0.1:18000/?t=1788243102', 'CCNEW Video Downloader')
     $app = New-Object System.Windows.Application
-    "Running app..." | Out-File $logFile -Append
     $app.Run($window)
 } catch {
     "Error: $_" | Out-File $logFile -Append
-    [System.Windows.MessageBox]::Show("启动失败: $_", 'CCNEW Video Downloader', 'OK', 'Error')
 }

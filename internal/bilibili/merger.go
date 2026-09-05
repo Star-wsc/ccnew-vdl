@@ -99,6 +99,8 @@ func getFFmpegCandidates() []string {
 			return []string{"ffmpeg-darwin-arm64", "ffmpeg"}
 		}
 		return []string{"ffmpeg-darwin-amd64", "ffmpeg"}
+	case "android":
+		return []string{"libffmpeg.so", "ffmpeg"}
 	default:
 		return []string{"ffmpeg"}
 	}
