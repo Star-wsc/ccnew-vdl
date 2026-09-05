@@ -290,6 +290,8 @@ func (h *Handlers) SetBilibiliCookie(c *gin.Context) {
 	h.cfg.BilibiliCookie = req.Cookie
 	h.cfg.Save()
 	h.bilibiliParser.SetCookies(req.Cookie)
+	h.bilibiliCollection.SetCookies(req.Cookie)
+	h.mgr.SetBilibiliCookie(req.Cookie) // 同步给下载管理器，立即生效
 	c.JSON(http.StatusOK, gin.H{"message": "B站Cookie已保存"})
 }
 
@@ -1828,6 +1830,9 @@ func (h *Handlers) refreshCollection(colID string) {
 		}
 	case "douyin":
 		parser := douyin.NewCollectionParser()
+		if h.cfg.DouyinCookie != "" {
+			parser.SetCookies(h.cfg.DouyinCookie)
+		}
 		collectionInfo, err := parser.ParseCollection(colURL)
 		if err != nil {
 			log.Printf("[ERROR] %s: 刷新合集失败: %v", colID, err)
