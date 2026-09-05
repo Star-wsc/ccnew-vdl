@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../widgets/glass.dart';
 import '../services/api_service.dart';
 import '../services/download_manager.dart';
+import '../services/local_store.dart';
 import '../services/native_bridge.dart';
 import '../services/theme_provider.dart';
 import '../widgets/preview_dialog.dart';
@@ -60,16 +61,36 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
-    _poll();
+    _loadCache(); // 先用手机缓存秒开列表
+    _poll(); // 再与服务器对账
     _timer = Timer.periodic(const Duration(seconds: 2), (_) => _poll());
     NativeBridge.setOnShareCallback((url) { _urlCtrl.text = url; _submit(); });
     NativeBridge.getPendingShare().then((url) { if (url != null && url.isNotEmpty) { _urlCtrl.text = url; _submit(); } });
+  }
+
+  /// 启动时从本地缓存加载列表，无网也能看到上次的内容
+  Future<void> _loadCache() async {
+    final tasks = await LocalStore.loadTasks();
+    final cols = await LocalStore.loadCollections();
+    final stats = await LocalStore.loadStats();
+    if (!mounted) return;
+    setState(() {
+      if (_tasks.isEmpty && tasks.isNotEmpty) _tasks = tasks;
+      if (_collections.isEmpty && cols.isNotEmpty) _collections = cols;
+      if (stats.isNotEmpty) _stats = stats;
+    });
   }
 
   @override
   void dispose() { _timer?.cancel(); _urlCtrl.dispose(); super.dispose(); }
 
   Future<void> _poll() async {
+    // 先探测连通性：离线时保持本地缓存内容不动，绝不能用空数据覆盖
+    final ok = await ApiService.checkConnection();
+    if (!ok) {
+      if (mounted) setState(() => _connected = false);
+      return;
+    }
     try {
       // 合集始终轮询，保证任意页面创建/状态变化即时可见
       final results = await Future.wait([
@@ -84,6 +105,10 @@ class _HomePageState extends State<HomePage> {
         _collections = results[2] as List<dynamic>;
         _connected = true;
       });
+      // 新数据回写本地缓存（内容变化才写盘）
+      LocalStore.saveTasks(_tasks);
+      LocalStore.saveCollections(_collections);
+      LocalStore.saveStats(_stats);
     } catch (_) { if (mounted) setState(() => _connected = false); }
     if (_tab == 2) { final l = await ApiService.getLogs(); if (mounted) setState(() => _logs = l); }
   }
