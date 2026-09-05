@@ -63,6 +63,32 @@ class MainActivity : FlutterActivity() {
                     }
                     result.success(type)
                 }
+                "getAppVersion" -> {
+                    val pm = packageManager.getPackageInfo(packageName, 0)
+                    result.success(mapOf(
+                        "version" to pm.versionName,
+                        "build" to if (android.os.Build.VERSION.SDK_INT >= 28) pm.longVersionCode.toInt() else pm.versionCode
+                    ))
+                }
+                "installApk" -> {
+                    // 触发系统安装器安装已下载的APK
+                    try {
+                        val path = call.argument<String>("path") ?: ""
+                        val file = File(path)
+                        if (!file.exists()) { result.success(false); return@setMethodCallHandler }
+                        val uri = androidx.core.content.FileProvider.getUriForFile(
+                            this, "$packageName.fileprovider", file)
+                        val intent = Intent(Intent.ACTION_VIEW).apply {
+                            setDataAndType(uri, "application/vnd.android.package-archive")
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        startActivity(intent)
+                        result.success(true)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "installApk failed", e)
+                        result.success(false)
+                    }
+                }
                 else -> result.notImplemented()
             }
         }

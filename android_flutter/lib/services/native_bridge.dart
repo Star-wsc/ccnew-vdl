@@ -46,6 +46,25 @@ class NativeBridge {
     }
   }
 
+  /// 当前APP版本 {"version": "1.5.0", "build": 2}
+  static Future<Map<String, dynamic>> getAppVersion() async {
+    try {
+      final r = await _channel.invokeMethod('getAppVersion');
+      return Map<String, dynamic>.from(r ?? {});
+    } catch (_) {
+      return {'version': '0.0.0', 'build': 0};
+    }
+  }
+
+  /// 触发系统安装器安装APK
+  static Future<bool> installApk(String path) async {
+    try {
+      return await _channel.invokeMethod('installApk', {'path': path}) ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
   static Future<bool> deleteFile(String filePath) async {
     try {
       return await _channel.invokeMethod('deleteFile', {'path': filePath}) ?? false;
