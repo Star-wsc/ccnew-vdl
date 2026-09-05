@@ -56,3 +56,12 @@ _edgeprof.bak/
 _edgeprof2/
 node_modules/
 *.old
+
+# 隐私与本地工件
+native/
+.zcode/
+mklink.ps1
+phone_screen.png
+server-linux-amd64
+PROJECT_HEALTH_REPORT.md
+*.local.ps1

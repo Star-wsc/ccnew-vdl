@@ -16,7 +16,7 @@
 └──────────────┬───────────────────────────┘
                │ HTTP (source=app 隔离)
 ┌──────────────▼───────────────────────────┐
-│ Ubuntu 服务器 <server-ip>:18000          │
+│ Ubuntu 服务器 <server-ip>:18000           │
 │ Go + Gin (v1.4.x)，systemd: ccnew-vdl      │
 │  - 抖音/B站解析(多策略+重试) 全部在此        │
 │  - DASH 音视频下载 + ffmpeg 合并            │
@@ -33,12 +33,12 @@
 
 | 项 | 值 |
 |---|---|
-| Flutter | `C:\flutter347\flutter`（3.47.2，Dart 3.8.1） |
-| Android SDK | `C:\Users\wsc76\AppData\Local\Android\Sdk` |
-| adb | `.../Sdk/platform-tools/adb.exe` |
+| Flutter | `%FLUTTER_HOME%`（3.47.2，Dart 3.8.1） |
+| Android SDK | `%LOCALAPPDATA%\Android\Sdk` |
+| adb | `%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe` |
 | 服务器 | `<user>@<server-ip>`，目录 `/home/<user>/ccnew-vdl-dev/` |
 | 服务器服务 | systemd `ccnew-vdl`，Restart=always，端口 18000 |
-| 服务器日志 | `/home/<user>/ccnew-vdl-dev/logs/server.log`（GIN 请求日志在 journal） |
+| 服务器日志 | `~/ccnew-vdl-dev/logs/server.log`（GIN 请求日志在 journal） |
 | 手机 | Xiaomi 17 Pro Max，无线调试（adb mdns 自动发现） |
 | APK 产物 | `android_flutter/build/app/outputs/flutter-apk/app-debug.apk` → 桌面 `DouBi下载器.apk` |
 
