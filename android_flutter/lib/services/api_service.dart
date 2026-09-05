@@ -69,7 +69,7 @@ class ApiService {
     }
   }
 
-  static Future<Map<String, dynamic>?> createTask(String url, {String quality = '1080p'}) async {
+  static Future<Map<String, dynamic>?> createTask(String url, {String quality = '4k'}) async {
     try {
       final resp = await http.post(
         Uri.parse('$baseUrl/api/tasks'),
@@ -138,6 +138,24 @@ class ApiService {
     try { await http.delete(Uri.parse('$baseUrl/api/collections/$id?deleteFile=true')); } catch (_) {}
   }
 
+  /// 合集内单个视频的播放地址
+  static String collectionVideoUrl(String colId, int idx) =>
+      '$baseUrl/api/collections/$colId/videos/$idx/file';
+
+  /// 删除合集内单个视频（抖音用video_id，B站用bvid）
+  static Future<void> deleteCollectionVideo(String videoId) async {
+    try { await http.delete(Uri.parse('$baseUrl/api/collections/videos/$videoId')); } catch (_) {}
+  }
+
+  /// 切换合集订阅
+  static Future<void> toggleCollectionSubscribe(String colId, bool subscribe) async {
+    try {
+      await http.post(Uri.parse('$baseUrl/api/collections/$colId/subscribe'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'subscribe': subscribe, 'refresh_interval': 60}));
+    } catch (_) {}
+  }
+
   /// 检查服务器连通性
   static Future<bool> checkConnection() async {
     try {
@@ -169,7 +187,7 @@ class ApiService {
   }
 
   /// 从预览数据创建下载任务
-  static Future<Map<String, dynamic>?> createFromPreview(Map<String, dynamic> preview, {String quality = '1080p'}) async {
+  static Future<Map<String, dynamic>?> createFromPreview(Map<String, dynamic> preview, {String quality = '4k'}) async {
     try {
       final url = preview['url'] ?? preview['video_url'] ?? '';
       final resp = await http.post(
@@ -207,7 +225,7 @@ class ApiService {
       if (selectedIndices != null) body['selected_indices'] = selectedIndices;
       body['source'] = 'app';
       body['auto_download'] = true; // 用户点了"添加到下载"，直接开下
-      if ((body['quality'] ?? '').toString().isEmpty) body['quality'] = '1080p';
+      if ((body['quality'] ?? '').toString().isEmpty) body['quality'] = '4k';
       final resp = await http.post(
         Uri.parse('$baseUrl/api/collections'),
         headers: {'Content-Type': 'application/json'},

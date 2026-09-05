@@ -108,13 +108,17 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     }
   }
 
-  /// 常驻兜底轮询：5分钟一次，仅前台运行
+  /// 调度下一次刷新：
+  /// - 有任务在解析/下载 → 2秒实时跟踪进度（绕过CD）
+  /// - 否则 → 5分钟兜底轮询
+  /// 仅前台运行
   void _armStandingTimer() {
     _timer?.cancel();
     if (!_foreground || !mounted) return;
-    _timer = Timer(_standingInterval, () async {
-      await _refresh();
-      _armStandingTimer();
+    final hasActive = _tasks.any((t) => t['status'] == 'downloading' || t['status'] == 'parsing');
+    final interval = hasActive ? const Duration(seconds: 2) : _standingInterval;
+    _timer = Timer(interval, () {
+      _refresh(force: hasActive);
     });
   }
 
@@ -127,40 +131,43 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   /// 拉取服务器数据。
-  /// force=true: 用户操作触发，绕过CD
+  /// force=true: 用户操作/下载跟踪触发，绕过CD
   /// force=false: 切菜单/兜底触发，1分钟内不重复请求
   Future<void> _refresh({bool force = false}) async {
     if (!_foreground || !mounted) return;
-    if (!force && DateTime.now().difference(_lastRefresh) < _refreshCD) return;
-    _lastRefresh = DateTime.now();
-
-    final net = await NativeBridge.getNetworkType();
-    if (mounted) setState(() => _netType = net);
-    // 先探测连通性：离线时保持本地缓存内容不动，绝不能用空数据覆盖
-    final ok = await ApiService.checkConnection();
-    if (!ok) {
-      if (mounted) setState(() => _connected = false);
-      return;
+    final cdBlocked = !force && DateTime.now().difference(_lastRefresh) < _refreshCD;
+    if (!cdBlocked) {
+      _lastRefresh = DateTime.now();
+      final net = await NativeBridge.getNetworkType();
+      if (mounted) setState(() => _netType = net);
+      // 先探测连通性：离线时保持本地缓存内容不动，绝不能用空数据覆盖
+      final ok = await ApiService.checkConnection();
+      if (!ok) {
+        if (mounted) setState(() => _connected = false);
+      } else {
+        try {
+          final results = await Future.wait([
+            ApiService.getStats(),
+            ApiService.getTasks(),
+            ApiService.getCollections(),
+          ]);
+          if (!mounted) return;
+          setState(() {
+            _stats = results[0] as Map<String, dynamic>;
+            _tasks = results[1] as List<dynamic>;
+            _collections = results[2] as List<dynamic>;
+            _connected = true;
+          });
+          // 新数据回写本地缓存（内容变化才写盘）
+          LocalStore.saveTasks(_tasks);
+          LocalStore.saveCollections(_collections);
+          LocalStore.saveStats(_stats);
+        } catch (_) { if (mounted) setState(() => _connected = false); }
+        if (_tab == 2) { final l = await ApiService.getLogs(); if (mounted) setState(() => _logs = l); }
+      }
     }
-    try {
-      final results = await Future.wait([
-        ApiService.getStats(),
-        ApiService.getTasks(),
-        ApiService.getCollections(),
-      ]);
-      if (!mounted) return;
-      setState(() {
-        _stats = results[0] as Map<String, dynamic>;
-        _tasks = results[1] as List<dynamic>;
-        _collections = results[2] as List<dynamic>;
-        _connected = true;
-      });
-      // 新数据回写本地缓存（内容变化才写盘）
-      LocalStore.saveTasks(_tasks);
-      LocalStore.saveCollections(_collections);
-      LocalStore.saveStats(_stats);
-    } catch (_) { if (mounted) setState(() => _connected = false); }
-    if (_tab == 2) { final l = await ApiService.getLogs(); if (mounted) setState(() => _logs = l); }
+    // 无论是否被CD拦截，都按当前状态重新调度下一次（下载中→2秒实时）
+    _armStandingTimer();
   }
 
   /// 从分享文字中提取 URL
