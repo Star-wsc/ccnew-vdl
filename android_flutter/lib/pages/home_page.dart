@@ -163,8 +163,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           LocalStore.saveCollections(_collections);
           LocalStore.saveStats(_stats);
         } catch (_) { if (mounted) setState(() => _connected = false); }
-        if (_tab == 2) { final l = await ApiService.getLogs(); if (mounted) setState(() => _logs = l); }
       }
+    }
+    // 日志页内容不受CD约束（切到日志页就是来看日志的）
+    if (_tab == 2) {
+      final l = await ApiService.getLogs();
+      if (mounted) setState(() => _logs = l);
     }
     // 无论是否被CD拦截，都按当前状态重新调度下一次（下载中→2秒实时）
     _armStandingTimer();
@@ -1082,8 +1086,16 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             ? Center(child: Text('暂无日志', style: TextStyle(color: text3)))
             : SingleChildScrollView(
                 padding: const EdgeInsets.all(14),
-                child: SelectableText(_logs,
-                  style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11, fontFamily: 'monospace', height: 1.6)),
+                child: SelectableText.rich(
+                  TextSpan(children: _logs.split('\n').map((line) {
+                    Color c = const Color(0xFF94A3B8);
+                    if (line.contains('[ERROR]')) c = red;
+                    else if (line.contains('[WARN]')) c = Colors.orange;
+                    else if (line.contains('[INFO]')) c = green;
+                    return TextSpan(text: '$line\n',
+                      style: TextStyle(color: c, fontSize: 11, fontFamily: 'monospace', height: 1.6));
+                  }).toList()),
+                ),
               ),
         ),
       )),

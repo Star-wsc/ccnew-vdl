@@ -63,7 +63,19 @@ class ApiService {
     try {
       final resp = await http.get(Uri.parse('$baseUrl/api/logs'))
           .timeout(const Duration(seconds: 5));
-      return resp.body;
+      // /api/logs 返回 JSON 数组 [{timestamp, level, task_id, message}]，格式化成日志行
+      try {
+        final list = jsonDecode(resp.body) as List<dynamic>;
+        return list.map((e) {
+          final ts = (e['timestamp'] ?? '').toString();
+          final level = (e['level'] ?? '').toString();
+          final msg = (e['message'] ?? '').toString();
+          final time = ts.length >= 19 ? ts.substring(11, 19) : ts; // ISO8601 → HH:MM:SS
+          return '$time [$level] $msg';
+        }).join('\n');
+      } catch (_) {
+        return resp.body; // 兼容纯文本
+      }
     } catch (_) {
       return '';
     }
