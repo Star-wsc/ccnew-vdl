@@ -475,6 +475,12 @@ func mapQualityAdvanced(gearName string, qualityType float64, width, height int)
 		return "360p"
 	}
 
+	// 只有宽高都为0（API未返回分辨率）时才信gear_name;
+	// 有实际宽高时上面的尺寸判定已经完成，不会走到这里。
+	// 抖音gear_name常含"4k"但实际流远低于该分辨率，不能信。
+	if width > 0 && height > 0 {
+		return "" // 有尺寸信息但没命中任何档位，跳过
+	}
 	lower := strings.ToLower(gearName)
 	switch {
 	case strings.Contains(lower, "4k") || strings.Contains(lower, "2160") || strings.Contains(lower, "uhd"):

@@ -113,6 +113,7 @@ func (m *Manager) loadTasks() {
 
 	var tasks []*Task
 	if err := json.Unmarshal(data, &tasks); err != nil {
+		log.Printf("[ERROR] tasks.json解析失败: %v (文件大小%d字节)", err, len(data))
 		return // 解析失败，忽略
 	}
 
@@ -140,8 +141,13 @@ func (m *Manager) saveTasks() {
 		return
 	}
 
+	// 原子写入: 先写临时文件再改名, 防止进程被杀时写半截导致任务数据丢失
 	os.MkdirAll(filepath.Dir(m.tasksFile), 0755)
-	os.WriteFile(m.tasksFile, data, 0644)
+	tmp := m.tasksFile + ".tmp"
+	if err := os.WriteFile(tmp, data, 0644); err != nil {
+		return
+	}
+	os.Rename(tmp, m.tasksFile)
 }
 
 // CreateTask 创建下载任务
@@ -335,10 +341,48 @@ func (m *Manager) ExecuteTask(ctx context.Context, taskID string) {
 	task.Progress = 100
 	task.Speed = 0
 	task.UpdatedAt = time.Now()
+	// 用ffprobe检测真实分辨率，校正质量标签（抖音API的gear_name常虚标）
+	if actual := detectActualQuality(outputPath); actual != "" {
+		task.Quality = actual
+		log.Printf("[真实质量] %s: 文件实际分辨率→%s (原标注:%s)", task.Title, actual, task.Quality)
+	}
 	m.mu.Unlock()
 
 	m.saveTasks()
-	m.emit("INFO", taskID, "下载完成: %s (%s)", task.Title, humanSize(fileInfo))
+	m.emit("INFO", taskID, "下载完成: %s (%s, %s)", task.Title, humanSize(fileInfo), task.Quality)
+}
+
+// detectActualQuality 用ffprobe检测文件真实分辨率，返回修正后的质量标签
+func detectActualQuality(path string) string {
+	cmd := exec.Command("ffprobe", "-v", "error", "-select_streams", "v:0",
+		"-show_entries", "stream=width,height", "-of", "csv=p=0", path)
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	var w, h int
+	if _, err := fmt.Sscanf(strings.TrimSpace(string(out)), "%d,%d", &w, &h); err != nil {
+		return ""
+	}
+	// 竖屏视频取较大边
+	maxDim := w
+	if h > maxDim {
+		maxDim = h
+	}
+	switch {
+	case maxDim >= 3840:
+		return "4k"
+	case maxDim >= 2560:
+		return "2k"
+	case maxDim >= 1920:
+		return "1080p"
+	case maxDim >= 1280:
+		return "720p"
+	case maxDim >= 854:
+		return "480p"
+	default:
+		return "360p"
+	}
 }
 
 // humanSize 字节数转可读字符串
@@ -430,12 +474,13 @@ func (m *Manager) ParseVideo(url, quality string) (map[string]interface{}, error
 	}
 
 	platform := identifyPlatform(url)
-	q := quality
-	if q == "" || q == "best" || q == "preview" {
+	// 外显清晰度必须是解析器返回的真实值，不能用请求参数覆盖
+	actualQuality := videoInfo.Quality
+	if actualQuality == "" {
 		if platform == "bilibili" {
-			q = "4k"
+			actualQuality = "4k"
 		} else {
-			q = "1080p"
+			actualQuality = "1080p"
 		}
 	}
 
@@ -446,7 +491,7 @@ func (m *Manager) ParseVideo(url, quality string) (map[string]interface{}, error
 		"video_url":          videoInfo.VideoURL,
 		"url":                url,
 		"platform":           platform,
-		"quality":            q,
+		"quality":            actualQuality,
 		"available_qualities": []string{"4k", "2k", "1080p", "720p", "480p"},
 	}
 	if videoInfo.AudioURL != "" {
