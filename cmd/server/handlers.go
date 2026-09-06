@@ -448,6 +448,26 @@ var proxyAllowedHostSuffixes = []string{
 	"zjcdn.com",
 	"snssdk.com",
 	"amemv.com",
+	// YouTube 封面/头像(国内直连不可达, 需经服务端代理)
+	"ytimg.com",
+	"ggpht.com",
+	"youtube.com",
+}
+
+// isYouTubeResource 判断是否YouTube系资源(出站需走yt代理)
+func isYouTubeResource(rawURL string) bool {
+	host := strings.ToLower(func() string {
+		if u, err := url.Parse(rawURL); err == nil {
+			return u.Hostname()
+		}
+		return ""
+	}())
+	for _, sfx := range []string{"ytimg.com", "ggpht.com", "youtube.com", "youtu.be"} {
+		if host == sfx || strings.HasSuffix(host, "."+sfx) {
+			return true
+		}
+	}
+	return false
 }
 
 // isProxyURLAllowed 判断目标是否为白名单内的平台资源地址。
@@ -490,13 +510,31 @@ func proxyDialControl(_, address string, _ syscall.RawConn) error {
 
 // newProxiedClient 构造带重定向校验与建连层 IP 校验的代理专用客户端。
 func newProxiedClient(timeout time.Duration) *http.Client {
-	dialer := &net.Dialer{Timeout: 10 * time.Second, Control: proxyDialControl}
+	return newProxiedClientFor(timeout, "")
+}
+
+// newProxiedClientFor 同上, outboundProxy非空时出站经指定HTTP代理(如YouTube代理)。
+// 走显式代理时跳过拨号IP校验: 拨号目标是管理员配置的可信代理,
+// SSRF防护由域名白名单+重定向校验承担。
+func newProxiedClientFor(timeout time.Duration, outboundProxy string) *http.Client {
+	var transport *http.Transport
+	if outboundProxy != "" {
+		pu, err := url.Parse(outboundProxy)
+		if err != nil || pu.Host == "" {
+			pu = nil
+		}
+		transport = &http.Transport{
+			Proxy: func(*http.Request) (*url.URL, error) { return pu, nil },
+		}
+	} else {
+		transport = &http.Transport{
+			DialContext: (&net.Dialer{Timeout: 10 * time.Second, Control: proxyDialControl}).DialContext,
+			Proxy:       http.ProxyFromEnvironment,
+		}
+	}
 	return &http.Client{
 		Timeout: timeout,
-		Transport: &http.Transport{
-			DialContext: dialer.DialContext,
-			Proxy:       http.ProxyFromEnvironment,
-		},
+		Transport: transport,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 5 {
 				return fmt.Errorf("too many redirects")
@@ -508,6 +546,18 @@ func newProxiedClient(timeout time.Duration) *http.Client {
 		},
 	}
 }
+
+// ytOutboundProxy 图片等资源出站代理: YouTube系资源走yt_proxy
+func (h *Handlers) ytOutboundProxy(imageURL string) string {
+	if isYouTubeResource(imageURL) && h.cfg != nil {
+		if h.cfg.YtProxy != "" {
+			return h.cfg.YtProxy
+		}
+		return h.cfg.Proxy
+	}
+	return ""
+}
+
 func (h *Handlers) ProxyImage(c *gin.Context) {
 	imageURL := c.Query("url")
 	if imageURL == "" {
@@ -520,7 +570,7 @@ func (h *Handlers) ProxyImage(c *gin.Context) {
 		return
 	}
 
-	client := newProxiedClient(15 * time.Second)
+	client := newProxiedClientFor(15*time.Second, h.ytOutboundProxy(imageURL))
 	req, err := http.NewRequest("GET", imageURL, nil)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "创建请求失败"})

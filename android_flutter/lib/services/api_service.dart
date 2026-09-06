@@ -179,6 +179,16 @@ class ApiService {
     }
   }
 
+  /// 封面地址: YouTube系封面国内直连不可达, 经服务器代理转发
+  static String coverSrc(String u) {
+    if (u.isEmpty) return u;
+    final lower = u.toLowerCase();
+    if (lower.contains('ytimg.com') || lower.contains('ggpht.com') || lower.contains('youtube.com')) {
+      return '$baseUrl/api/proxy/image?url=${Uri.encodeComponent(u)}';
+    }
+    return u;
+  }
+
   /// 获取下载 URL（兼容旧版用 /download，新版用 /stream 自动删服务端文件）
   static String streamUrl(String taskId) => '$baseUrl/api/tasks/$taskId/stream';
   static String downloadUrl(String taskId) => '$baseUrl/api/tasks/$taskId/download';

@@ -622,7 +622,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             ClipRRect(
               borderRadius: BorderRadius.circular(12),
               child: Stack(children: [
-                Image.network(cover, width: 72, height: 72, fit: BoxFit.cover,
+                Image.network(ApiService.coverSrc(cover), width: 72, height: 72, fit: BoxFit.cover,
                   errorBuilder: (_, __, ___) => Container(width: 72, height: 72, color: const Color(0x0DFFFFFF))),
                 if (platform.isNotEmpty)
                   Positioned(bottom: 4, left: 4, child: _tag(
@@ -750,7 +750,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             borderRadius: BorderRadius.circular(10),
             child: Stack(children: [
               if (cover.isNotEmpty)
-                Image.network(cover, width: double.infinity, height: double.infinity, fit: BoxFit.cover,
+                Image.network(ApiService.coverSrc(cover), width: double.infinity, height: double.infinity, fit: BoxFit.cover,
                   errorBuilder: (_, __, ___) => Container(color: const Color(0x0DFFFFFF)))
               else
                 Container(color: const Color(0x0DFFFFFF), child: Center(child: Icon(Icons.video_file, color: text3, size: 32))),
@@ -943,7 +943,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
                 leading: cover.isNotEmpty
                   ? ClipRRect(borderRadius: BorderRadius.circular(10),
-                      child: Image.network(cover, width: 48, height: 48, fit: BoxFit.cover,
+                      child: Image.network(ApiService.coverSrc(cover), width: 48, height: 48, fit: BoxFit.cover,
                         errorBuilder: (_, __, ___) => Container(width: 48, height: 48, color: bg.withOpacity(0.3))))
                   : null,
                 title: Text(title, style: TextStyle(color: text1, fontWeight: FontWeight.w600, fontSize: 14),
@@ -991,7 +991,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       child: Row(children: [
         if (cover.isNotEmpty) ...[
           ClipRRect(borderRadius: BorderRadius.circular(8),
-            child: Image.network(cover, width: 48, height: 48, fit: BoxFit.cover,
+            child: Image.network(ApiService.coverSrc(cover), width: 48, height: 48, fit: BoxFit.cover,
               errorBuilder: (_, __, ___) => Container(width: 48, height: 48, color: bg.withOpacity(0.3)))),
           const SizedBox(width: 10),
         ],
