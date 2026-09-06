@@ -116,7 +116,7 @@ input[type=text]:focus,textarea:focus{border-color:rgba(0,255,163,.55);box-shado
 .tcard{display:flex;gap:16px;padding:15px 18px;margin:0 14px 12px;border-radius:10px;border:1px solid transparent;transition:.18s}
 .tcard:hover{background:rgba(0,255,163,.04);border-color:var(--line)}
 .tcard.sel{border-color:rgba(0,255,163,.45);background:rgba(0,255,163,.06)}
-.tchk{position:absolute;top:8px;left:8px;z-index:5;cursor:pointer}
+.tchk{cursor:pointer;display:flex;align-items:center;margin-right:auto}
 .tchk input{width:16px;height:16px;accent-color:var(--acc);cursor:pointer}
 .tcov{position:relative;width:128px;height:72px;flex:none;border-radius:9px;overflow:hidden;background:#0a101a;border:1px solid var(--line)}
 .tcov img{width:100%;height:100%;object-fit:cover;transition:transform .25s}
@@ -482,12 +482,12 @@ function renderTasks(){
   TASKS.forEach(t=>{
     const dl=t.status==="downloading",a=taskAggregate(t);
     const actions=(t.status==="failed"?taskActionsRetry(t.id):"")+(t.status==="completed"?(taskActionsPlay(t.id)+taskActionsDownload(t.id)):"")+taskActionsDelete(t.id);
-    const checked=SEL.has(t.id);
-    cards.push('<article class="tcard glass hoverable'+(checked?' sel':'')+'" data-tid="'+t.id+'"><label class="tchk" onclick="event.stopPropagation()"><input type="checkbox"'+(checked?' checked':'')+' data-sid="'+t.id+'"></label>'+taskCover(t.cover_url,t.platform)+
+    const tchk='<label class="tchk" onclick="event.stopPropagation()" title="多选"><input type="checkbox"'+(checked?' checked':'')+' data-sid="'+t.id+'"></label>';
+    cards.push('<article class="tcard glass hoverable'+(checked?' sel':'')+'" data-tid="'+t.id+'">'+taskCover(t.cover_url,t.platform)+
       '<div class="tm"><div class="tt">'+(t.title?esc(t.title):'<i style="color:var(--faint)">解析中 …</i>')+'</div><div class="tv">'+plat(t.platform)+spill(t.status)+
       (t.author?'<span>'+esc(t.author)+'</span>':'')+(t.quality?'<span>'+esc(t.quality.toUpperCase())+'</span>':'')+(t.file_size?'<span>'+fsz(t.file_size)+'</span>':'')+
       (t.error_message?'<span class="err-t">'+esc(t.error_message)+'</span>':'')+'</div>'+progressBar(a.progress,a.speed,dl)+'</div>'+
-      '<div class="ts">'+actions+'</div></article>');
+      '<div class="ts">'+tchk+actions+'</div></article>');
   });
   /* 合集卡片 */
   COLS.forEach(c=>{
