@@ -117,13 +117,30 @@ func (m *Manager) loadTasks() {
 		return // 解析失败，忽略
 	}
 
+	corrected := 0
 	for _, task := range tasks {
 		// 重置进行中的任务状态为失败（因为服务器重启了）
 		if task.Status == StatusParsing || task.Status == StatusDownloading {
 			task.Status = StatusFailed
 			task.ErrorMessage = "服务器重启，任务中断"
 		}
+		// 启动时批量修正已完成任务的清晰度标签（老任务可能虚标4k/1080p）
+		if task.Status == StatusCompleted && task.FilePath != "" {
+			if actual := detectActualQuality(task.FilePath); actual != "" && actual != task.Quality {
+				log.Printf("[启动修正] %s: %s → %s", task.Title, task.Quality, actual)
+				task.Quality = actual
+				corrected++
+			}
+		}
 		m.tasks[task.ID] = task
+	}
+	if corrected > 0 {
+		log.Printf("[启动修正] 共修正%d条任务的清晰度标签", corrected)
+		// 修正后立即持久化
+		go func() {
+			time.Sleep(2 * time.Second) // 等待初始化完成
+			m.saveTasks()
+		}()
 	}
 }
 
