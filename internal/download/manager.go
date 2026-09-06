@@ -211,10 +211,17 @@ func (m *Manager) ExecuteTask(ctx context.Context, taskID string) {
 			Platform: task.Platform,
 			Quality:  task.Quality,
 		}
-		// 如果预览数据没有音频URL，尝试重新解析获取(YouTube走yt-dlp引擎, 无需补音频)
-		if videoInfo.AudioURL == "" && task.Platform != "youtube" {
-			if parsed, parseErr := m.parseVideo(task.URL, task.Quality); parseErr == nil && parsed != nil && parsed.AudioURL != "" {
-				videoInfo.AudioURL = parsed.AudioURL
+		// preview路径需要重新解析: 拿真实清晰度(B站)和音频URL(抖音)
+		// YouTube走yt-dlp引擎, 无需补音频; Quality由yt-dlp决定
+		if task.Platform != "youtube" {
+			if parsed, parseErr := m.parseVideo(task.URL, task.Quality); parseErr == nil && parsed != nil {
+				if parsed.AudioURL != "" {
+					videoInfo.AudioURL = parsed.AudioURL
+				}
+				// B站: 用API返回的真实清晰度(不是APP传来的请求参数)
+				if parsed.Quality != "" {
+					videoInfo.Quality = parsed.Quality
+				}
 			}
 		}
 		m.updateTaskStatus(taskID, StatusDownloading, "")
