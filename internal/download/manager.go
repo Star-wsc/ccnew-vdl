@@ -392,21 +392,25 @@ func detectActualQuality(path string) string {
 	if _, err := fmt.Sscanf(strings.TrimSpace(string(out)), "%d,%d", &w, &h); err != nil {
 		return ""
 	}
-	// 取较大边作为实际分辨率（兼容横竖屏）
-	maxDim := w
-	if h > maxDim {
-		maxDim = h
+	// 取较短边判断清晰度: 1080P定义就是短边1080
+	// 1920x1080(横屏) → 短边1080 → 1080P
+	// 1080x1920(竖屏) → 短边1080 → 1080P
+	// 1440x1080(4:3)  → 短边1080 → 1080P
+	// 852x480         → 短边480  → 480P
+	dim := w
+	if h < w {
+		dim = h
 	}
 	switch {
-	case maxDim >= 3840:
+	case dim >= 2160:
 		return "4k"
-	case maxDim >= 2560:
+	case dim >= 1440:
 		return "2k"
-	case maxDim >= 1920:
+	case dim >= 1080:
 		return "1080p"
-	case maxDim >= 1280:
+	case dim >= 720:
 		return "720p"
-	case maxDim >= 640:
+	case dim >= 480:
 		return "480p"
 	default:
 		return "360p"

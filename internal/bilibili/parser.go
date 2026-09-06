@@ -347,16 +347,16 @@ func uniqueStrings(items []string) []string {
 	return result
 }
 func qualityName(qn int) string {
-	switch qn {
-	case 120:
+	switch {
+	case qn >= 120:
 		return "4K"
-	case 80:
+	case qn >= 80:
 		return "1080P"
-	case 64:
+	case qn >= 64:
 		return "720P"
-	case 32:
+	case qn >= 32:
 		return "480P"
 	default:
-		return fmt.Sprintf("%d", qn)
+		return "360P"
 	}
 }
