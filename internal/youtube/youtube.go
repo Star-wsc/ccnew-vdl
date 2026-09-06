@@ -2,6 +2,7 @@ package youtube
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // IsYouTubeURL 判断是否YouTube链接(含youtu.be/Shorts/音乐站)
@@ -91,6 +93,36 @@ func ParseInfo(url, proxy string) (*VideoInfo, error) {
 		return nil, fmt.Errorf("未获取到视频信息")
 	}
 	return &vi, nil
+}
+
+// Version 当前yt-dlp版本号
+func Version() (string, error) {
+	bin, err := FindYTDLP()
+	if err != nil {
+		return "", err
+	}
+	out, err := exec.Command(bin, "--version").Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// SelfUpdate 执行yt-dlp -U自更新(独立二进制自带能力), 返回更新输出与更新后版本
+func SelfUpdate() (string, string, error) {
+	bin, err := FindYTDLP()
+	if err != nil {
+		return "", "", err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, bin, "-U").CombinedOutput()
+	output := strings.TrimSpace(string(out))
+	if err != nil {
+		return output, "", fmt.Errorf("yt-dlp更新失败: %w", err)
+	}
+	newVer, _ := Version()
+	return output, newVer, nil
 }
 
 // QualityToHeight 档位→最大高度

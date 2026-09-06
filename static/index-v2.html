@@ -327,6 +327,7 @@ input[type=text]:focus,textarea:focus{border-color:rgba(0,255,163,.55);box-shado
       <h3>[ YouTube 代理 ]</h3><div class="d">国内访问 YouTube 必需，填代理服务器地址（YouTube 解析下载与封面均走此代理）</div>
       <div class="sr"><label>代理地址</label><input type="text" id="ytIn" placeholder="http://127.0.0.1:7892"></div>
       <div class="sr"><label></label><button class="btn sm primary" onclick="saveYt()">保存代理</button><span class="masked" id="ytMask">未设置</span></div>
+      <div class="sr"><label>解析引擎</label><span class="masked" id="ytVer">-</span><button class="btn sm" id="ytUpdB" onclick="updYt()">更新引擎</button></div>
     </div>
     <div class="glass sgrp">
       <h3>[ 系统 ]</h3>
@@ -482,6 +483,7 @@ function renderTasks(){
   TASKS.forEach(t=>{
     const dl=t.status==="downloading",a=taskAggregate(t);
     const actions=(t.status==="failed"?taskActionsRetry(t.id):"")+(t.status==="completed"?(taskActionsPlay(t.id)+taskActionsDownload(t.id)):"")+taskActionsDelete(t.id);
+    const checked=SEL.has(t.id);
     const tchk='<label class="tchk" onclick="event.stopPropagation()" title="多选"><input type="checkbox"'+(checked?' checked':'')+' data-sid="'+t.id+'"></label>';
     cards.push('<article class="tcard glass hoverable'+(checked?' sel':'')+'" data-tid="'+t.id+'">'+taskCover(t.cover_url,t.platform)+
       '<div class="tm"><div class="tt">'+(t.title?esc(t.title):'<i style="color:var(--faint)">解析中 …</i>')+'</div><div class="tv">'+plat(t.platform)+spill(t.status)+
@@ -596,13 +598,15 @@ async function clearLogs(){try{await api("/api/logs",{method:"DELETE"});refreshL
 /* ===== 系统设置 ===== */
 async function initSet(){try{const c=await api("/api/config");$("#sVer").textContent=(c.version||"dev")+" · "+(c.platform||"");$("#sDir").value=c.download_dir||""}catch(e){}
  try{const b=await api("/api/bilibili/cookie");$("#biliMask").textContent=b.has_cookie?(b.cookie_masked||"已设置"):"未设置"}catch(e){}
- try{const s=await api("/api/settings");$("#ytIn").value=s.yt_proxy||"";$("#ytMask").textContent=s.yt_proxy?"已设置":"未设置"}catch(e){}}
+ try{const s=await api("/api/settings");$("#ytIn").value=s.yt_proxy||"";$("#ytMask").textContent=s.yt_proxy?"已设置":"未设置"}catch(e){}
+ try{const y=await api("/api/ytdlp");$("#ytVer").textContent=(y.version||"-")+(y.error?"（异常）":"")}catch(e){}}
 async function browseDir(){try{const r=await api("/api/browse-folder",{method:"POST"});if(r.path)$("#sDir").value=r.path}catch(e){toast(e.message,"err")}}
 async function saveDir(){try{await api("/api/download-dir",{method:"POST",body:JSON.stringify({path:$("#sDir").value.trim()})});toast("目录已保存")}catch(e){toast(e.message,"err")}}
 async function saveBili(){try{await api("/api/bilibili/cookie",{method:"POST",body:JSON.stringify({cookie:$("#biliIn").value.trim()})});toast("B站 Cookie 已保存");initSet()}catch(e){toast(e.message,"err")}}
 async function scanLogin(){const b=$("#scanB");b.disabled=true;b.textContent="等待扫码…";try{const r=await api("/api/bilibili/login",{method:"POST"});toast(r.success?"登录成功":"未完成："+(r.message||""),r.success?"":"warn");initSet()}catch(e){toast(e.message,"err")}finally{b.disabled=false;b.textContent="扫码登录（拉起窗口）"}}
 async function saveDy(){try{await api("/api/settings",{method:"POST",body:JSON.stringify({douyin_cookie:$("#dyIn").value.trim()})});toast("抖音 Cookie 已保存")}catch(e){toast(e.message,"err")}}
 async function saveYt(){try{await api("/api/settings",{method:"POST",body:JSON.stringify({yt_proxy:$("#ytIn").value.trim()})});toast("YouTube 代理已保存，即刻生效");initSet()}catch(e){toast(e.message,"err")}}
+async function updYt(){const b=$("#ytUpdB");b.disabled=true;b.textContent="更新中…";try{const r=await api("/api/ytdlp/update",{method:"POST"});if(r.success){toast("yt-dlp 已更新到 "+(r.version||"最新"));$("#ytVer").textContent=r.version||""}else{toast((r.error||"更新失败")+(r.output?"："+r.output.split("\n").pop():""),"warn")}}catch(e){toast(e.message,"err")}finally{b.disabled=false;b.textContent="更新引擎"}}
 async function toggleCon(){try{const v=await api("/api/console/visible");await api("/api/console/toggle",{method:"POST",body:JSON.stringify({show:!v.visible})});syncCon()}catch(e){toast(e.message,"err")}}
 async function syncCon(){try{const v=await api("/api/console/visible");$("#conB").textContent=v.visible?"隐藏":"显示"}catch(e){}}
 async function chkUpd(){toast("正在检查更新…");try{const r=await api("/api/update",{method:"POST"});toast(r.message||r.error||"完成")}catch(e){toast(e.message,"err")}}

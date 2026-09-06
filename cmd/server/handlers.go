@@ -27,6 +27,7 @@ import (
 	"github.com/Star-wsc/ccnew-vdl/internal/douyin"
 	"github.com/Star-wsc/ccnew-vdl/internal/download"
 	"github.com/Star-wsc/ccnew-vdl/internal/fsutil"
+	"github.com/Star-wsc/ccnew-vdl/internal/youtube"
 	"github.com/gin-gonic/gin"
 )
 
@@ -1816,6 +1817,41 @@ func (h *Handlers) GetSettings(c *gin.Context) {
 		"yt_proxy":     h.cfg.YtProxy,
 		"proxy":        h.cfg.Proxy,
 	})
+}
+
+// YTDLPInfo yt-dlp引擎状态
+func (h *Handlers) YTDLPInfo(c *gin.Context) {
+	ver, err := youtube.Version()
+	path, _ := youtube.FindYTDLP()
+	c.JSON(http.StatusOK, gin.H{
+		"version": ver,
+		"path":    path,
+		"error":   errStr(err),
+	})
+}
+
+// YTDLPUpdate 拉取最新yt-dlp(YouTube协议变更时引擎自愈)
+func (h *Handlers) YTDLPUpdate(c *gin.Context) {
+	output, newVer, err := youtube.SelfUpdate()
+	ok := err == nil
+	if newVer == "" {
+		if v, e := youtube.Version(); e == nil {
+			newVer = v
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": ok,
+		"version": newVer,
+		"output":  output,
+		"error":   errStr(err),
+	})
+}
+
+func errStr(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 // ==================== Helpers ====================

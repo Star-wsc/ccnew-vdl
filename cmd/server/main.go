@@ -16,6 +16,7 @@ import (
 
 	"github.com/Star-wsc/ccnew-vdl/internal/config"
 	"github.com/Star-wsc/ccnew-vdl/internal/download"
+	"github.com/Star-wsc/ccnew-vdl/internal/youtube"
 	"github.com/gin-gonic/gin"
 )
 
@@ -125,6 +126,20 @@ func main() {
 	// 恢复持久化的操作日志（重启不丢）
 	h.loadOperationLogs()
 
+	// yt-dlp引擎自动更新: 启动后台检查一次, 之后每24小时静默拉新
+	// (YouTube协议变更频繁, 引擎保持新鲜才能持续可用; 失败仅记日志不影响服务)
+	go func() {
+		for {
+			if out, newVer, err := youtube.SelfUpdate(); err != nil {
+				log.Printf("[WARN] yt-dlp自动更新跳过: %v", err)
+			} else if strings.Contains(out, "Updated") || strings.Contains(out, "updating to") {
+				log.Printf("[INFO] yt-dlp已自动更新: %s", newVer)
+				h.addLog("INFO", "", "YouTube解析引擎已自动更新: "+newVer)
+			}
+			time.Sleep(24 * time.Hour)
+		}
+	}()
+
 	// 加载持久化的合集数据
 	if err := h.loadCollections(); err != nil {
 		log.Printf("[WARN] 加载合集数据失败: %v", err)
@@ -166,6 +181,8 @@ func main() {
 	r.DELETE("/api/logs", h.ClearLogs)
 	r.POST("/api/settings", h.SaveSettings)
 	r.GET("/api/settings", h.GetSettings)
+	r.GET("/api/ytdlp", h.YTDLPInfo)
+	r.POST("/api/ytdlp/update", h.YTDLPUpdate)
 	r.GET("/api/console/visible", h.GetConsoleVisible)
 	r.POST("/api/update", h.TriggerUpdate)
 	r.POST("/api/console/toggle", h.ToggleConsoleWindow)
