@@ -18,6 +18,7 @@ import (
 	"github.com/Star-wsc/ccnew-vdl/internal/bilibili"
 	"github.com/Star-wsc/ccnew-vdl/internal/config"
 	"github.com/Star-wsc/ccnew-vdl/internal/douyin"
+	"github.com/Star-wsc/ccnew-vdl/internal/youtube"
 )
 
 type TaskStatus string
@@ -186,8 +187,8 @@ func (m *Manager) ExecuteTask(ctx context.Context, taskID string) {
 			Platform: task.Platform,
 			Quality:  task.Quality,
 		}
-		// 如果预览数据没有音频URL，尝试重新解析获取
-		if videoInfo.AudioURL == "" {
+		// 如果预览数据没有音频URL，尝试重新解析获取(YouTube走yt-dlp引擎, 无需补音频)
+		if videoInfo.AudioURL == "" && task.Platform != "youtube" {
 			if parsed, parseErr := m.parseVideo(task.URL, task.Quality); parseErr == nil && parsed != nil && parsed.AudioURL != "" {
 				videoInfo.AudioURL = parsed.AudioURL
 			}
@@ -443,6 +444,7 @@ func (m *Manager) ParseVideo(url, quality string) (map[string]interface{}, error
 		"author":             videoInfo.Author,
 		"cover_url":          videoInfo.CoverURL,
 		"video_url":          videoInfo.VideoURL,
+		"url":                url,
 		"platform":           platform,
 		"quality":            q,
 		"available_qualities": []string{"4k", "2k", "1080p", "720p", "480p"},
@@ -561,9 +563,36 @@ func (m *Manager) parseVideo(url, quality string) (*videoInfo, error) {
 			Quality:  actualQuality,
 		}, nil
 
+	case "youtube":
+		// YouTube引擎: yt-dlp(VideoURL存页面地址, 下载时交给yt-dlp处理)
+		ytInfo, err := youtube.ParseInfo(url, m.ytProxy())
+		if err != nil {
+			return nil, err
+		}
+		actualQuality := quality
+		if actualQuality == "" || actualQuality == "preview" {
+			actualQuality = "1080p"
+		}
+		return &videoInfo{
+			Title:    ytInfo.Title,
+			Author:   ytInfo.Uploader,
+			CoverURL: ytInfo.Thumbnail,
+			VideoURL: url,
+			Platform: "youtube",
+			Quality:  actualQuality,
+		}, nil
+
 	default:
 		return nil, fmt.Errorf("不支持的平台")
 	}
+}
+
+// ytProxy YouTube专用代理: 优先yt_proxy, 回退proxy
+func (m *Manager) ytProxy() string {
+	if m.cfg.YtProxy != "" {
+		return m.cfg.YtProxy
+	}
+	return m.cfg.Proxy
 }
 
 type videoInfo struct {
@@ -611,6 +640,14 @@ func (m *Manager) downloadVideo(info *videoInfo, outputPath string, progressFunc
 			return nil
 		}
 		return m.douyinDownloader.DownloadVideo(info.VideoURL, outputPath, cookies, progressFunc)
+
+	case "youtube":
+		log.Printf("[YouTube] 使用yt-dlp下载, 画质上限: %s", info.Quality)
+		if err := youtube.Download(info.VideoURL, info.Quality, outputPath, m.ytProxy(), progressFunc); err != nil {
+			return err
+		}
+		log.Printf("[YouTube] 下载合并完成")
+		return nil
 
 	default:
 		return fmt.Errorf("不支持的平台")
@@ -695,6 +732,7 @@ func (m *Manager) generateOutputPath(title, platform string) string {
 	prefix := map[string]string{
 		"bilibili": "bz_",
 		"douyin":   "dy_",
+		"youtube":  "yt_",
 	}[platform]
 	if prefix == "" {
 		prefix = "vd_"
@@ -769,6 +807,9 @@ func identifyPlatform(url string) string {
 	}
 	if strings.Contains(url, "douyin.com") || strings.Contains(url, "iesdouyin.com") || strings.Contains(url, "v.douyin.com") {
 		return "douyin"
+	}
+	if youtube.IsYouTubeURL(url) {
+		return "youtube"
 	}
 	return ""
 }

@@ -81,6 +81,7 @@ input[type=text]:focus,textarea:focus{border-color:rgba(0,255,163,.55);box-shado
 .plat{font-family:var(--mono);font-size:9.5px;font-weight:800;padding:2px 7px;border-radius:5px}
 .plat.bilibili{background:var(--cyd);color:var(--cy)}
 .plat.douyin{background:var(--errd);color:var(--err)}
+.plat.youtube{background:rgba(255,0,0,.18);color:#ff5a5a}
 
 /* ===== 指令坞 ===== */
 .deck{padding:26px 30px;margin-bottom:22px;position:sticky;top:0;z-index:10;overflow:hidden;background:var(--bg);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-bottom:1px solid var(--line)}
@@ -346,7 +347,7 @@ function fsz(b){if(!b)return"-";const u=["B","KB","MB","GB"];let i=0,v=b;while(v
 function fdur(sec){if(!sec)return"--:--";const m=Math.floor(sec/60),s=Math.floor(sec%60);return String(m).padStart(2,"0")+":"+String(s).padStart(2,"0")}
 function ftm(ts){try{return new Date(ts).toLocaleTimeString("zh-CN",{hour12:false})}catch(e){return""}}
 function pimg(u){return u?"/api/proxy/image?url="+encodeURIComponent(u):""}
-function plat(p){return p==="bilibili"?'<span class="plat bilibili">B</span>':p==="douyin"?'<span class="plat douyin">D</span>':""}
+function plat(p){return p==="bilibili"?'<span class="plat bilibili">B</span>':p==="douyin"?'<span class="plat douyin">D</span>':p==="youtube"?'<span class="plat youtube">YT</span>':""}
 function spill(s){return'<span class="pill '+esc(s)+'">'+({pending:"待命",parsing:"解析中",downloading:"下载中",completed:"已完成",failed:"失败",partial:"部分完成"}[s]||esc(s))+"</span>"}
 function goClassic(){location.href="/static/index.html?t="+Date.now()}
 

@@ -58,6 +58,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   /// 获取最佳播放路径：优先 content URI，其次本地临时文件，最后服务器 URL
   String? _playbackUrl(String id) => _galleryUri[id] ?? _localCache[id];
 
+  /// 平台显示名
+  String _platName(String p) => p == 'bilibili' ? 'B站' : p == 'youtube' ? '油管' : '抖音';
+  /// 平台徽章色
+  Color _platColor(String p) => p == 'bilibili' ? blue : p == 'youtube' ? const Color(0xFFFF4D4D) : red;
+
   @override
   void initState() {
     super.initState();
@@ -621,8 +626,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                   errorBuilder: (_, __, ___) => Container(width: 72, height: 72, color: const Color(0x0DFFFFFF))),
                 if (platform.isNotEmpty)
                   Positioned(bottom: 4, left: 4, child: _tag(
-                    platform == 'bilibili' ? 'B站' : '抖音',
-                    platform == 'bilibili' ? blue : red)),
+                    _platName(platform),
+                    _platColor(platform))),
               ]),
             ),
             const SizedBox(width: 12),
@@ -754,12 +759,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 Positioned(top: 4, left: 4, child: Container(
                   width: 22, height: 22,
                   decoration: BoxDecoration(
-                    color: platform == 'bilibili' ? const Color(0xFFFF6B9D) : Colors.black.withOpacity(0.85),
+                    color: platform == 'bilibili' ? const Color(0xFFFF6B9D) : platform == 'youtube' ? const Color(0xFFFF0000) : Colors.black.withOpacity(0.85),
                     borderRadius: BorderRadius.circular(6),
                   ),
                   alignment: Alignment.center,
                   child: Text(
-                    platform == 'bilibili' ? 'B' : 'D',
+                    platform == 'bilibili' ? 'B' : platform == 'youtube' ? 'Y' : 'D',
                     style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w900),
                   ),
                 )),
@@ -944,7 +949,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 title: Text(title, style: TextStyle(color: text1, fontWeight: FontWeight.w600, fontSize: 14),
                   maxLines: 2, overflow: TextOverflow.ellipsis),
                 subtitle: Row(children: [
-                  if (platform.isNotEmpty) ...[_tag(platform == 'bilibili' ? 'B站' : '抖音', platform == 'bilibili' ? blue : red), const SizedBox(width: 8)],
+                  if (platform.isNotEmpty) ...[_tag(_platName(platform), _platColor(platform)), const SizedBox(width: 8)],
                   Text('$completedCount/$totalCount 已完成', style: TextStyle(color: green, fontSize: 12, fontWeight: FontWeight.w500)),
                 ]),
                 trailing: Row(mainAxisSize: MainAxisSize.min, children: [

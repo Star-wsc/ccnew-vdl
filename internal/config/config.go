@@ -14,6 +14,7 @@ type Config struct {
 	BilibiliCookie string `json:"bilibili_cookie"`
 	DouyinCookie   string `json:"douyin_cookie"`
 	Proxy          string `json:"proxy"`
+	YtProxy        string `json:"yt_proxy"` // YouTube专用代理(国内访问YouTube需要)，空则回退Proxy
 }
 
 func Load() *Config {
@@ -57,6 +58,9 @@ func Load() *Config {
 					}
 					if fileCfg.Proxy != "" {
 						cfg.Proxy = fileCfg.Proxy
+					}
+					if fileCfg.YtProxy != "" {
+						cfg.YtProxy = fileCfg.YtProxy
 					}
 					break // 找到第一个有效配置文件就停止
 				}
