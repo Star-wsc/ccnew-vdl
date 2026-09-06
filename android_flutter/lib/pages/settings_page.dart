@@ -1,4 +1,6 @@
 import 'dart:ui';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/api_service.dart';
@@ -14,7 +16,9 @@ class SettingsPage extends StatefulWidget {
 
 class _SettingsPageState extends State<SettingsPage> {
   final _serverCtrl = TextEditingController();
+  final _ytProxyCtrl = TextEditingController();
   bool _testing = false;
+  bool _savingYt = false;
   String? _toast;
   Map<String, dynamic> _config = {};
   bool _serverOnline = false;
@@ -62,8 +66,39 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Future<void> _checkServer() async {
     _serverOnline = await ApiService.checkConnection();
-    if (_serverOnline) _config = await ApiService.getConfig();
+    if (_serverOnline) {
+      _config = await ApiService.getConfig();
+      await _loadYtProxy();
+    }
     if (mounted) setState(() {});
+  }
+
+  /// 加载服务器当前的YouTube代理设置
+  Future<void> _loadYtProxy() async {
+    try {
+      final resp = await http.get(Uri.parse('${ApiService.baseUrl}/api/settings'))
+          .timeout(const Duration(seconds: 5));
+      if (resp.statusCode == 200) {
+        final v = (jsonDecode(resp.body) as Map<String, dynamic>)['yt_proxy'] ?? '';
+        _ytProxyCtrl.text = v.toString();
+      }
+    } catch (_) {}
+  }
+
+  /// 保存YouTube代理到服务器
+  Future<void> _saveYtProxy() async {
+    setState(() => _savingYt = true);
+    try {
+      final resp = await http.post(
+        Uri.parse('${ApiService.baseUrl}/api/settings'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'yt_proxy': _ytProxyCtrl.text.trim()}),
+      ).timeout(const Duration(seconds: 8));
+      if (mounted) _showToast(resp.statusCode == 200 ? 'YouTube代理已保存' : '保存失败');
+    } catch (_) {
+      if (mounted) _showToast('保存失败');
+    }
+    if (mounted) setState(() => _savingYt = false);
   }
 
   void _showToast(String msg) {
@@ -125,6 +160,18 @@ class _SettingsPageState extends State<SettingsPage> {
               _input(tp, _serverCtrl, '服务器地址', 'http://192.168.x.x:18000', Icons.language_rounded),
               const SizedBox(height: 12),
               SizedBox(width: double.infinity, child: _btn(tp, '测试连接', Icons.wifi_find_rounded, onPressed: _testing ? null : _testConnection, loading: _testing)),
+            ])),
+            const SizedBox(height: 16),
+            // YouTube 代理（服务器端设置）
+            _section(tp, Icons.shield_rounded, 'YouTube 代理'),
+            _card(tp, Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              _input(tp, _ytProxyCtrl, '代理地址（留空 = 直连）', 'http://127.0.0.1:7892', Icons.vpn_key_rounded),
+              const SizedBox(height: 12),
+              SizedBox(width: double.infinity, child: _btn(tp, '保存到服务器', Icons.save_rounded,
+                onPressed: _serverOnline && !_savingYt ? _saveYtProxy : null, loading: _savingYt)),
+              const SizedBox(height: 8),
+              Text('国内服务器访问 YouTube 必需。YouTube 的解析、下载、封面均走此代理，保存后即刻生效，无需重启。',
+                style: TextStyle(color: tp.textDim, fontSize: 11)),
             ])),
             const SizedBox(height: 16),
             // 外观

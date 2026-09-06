@@ -325,6 +325,11 @@ input[type=text]:focus,textarea:focus{border-color:rgba(0,255,163,.55);box-shado
       <div class="sr"><label></label><button class="btn sm primary" onclick="saveDy()">保存</button></div>
     </div>
     <div class="glass sgrp">
+      <h3>[ YouTube 代理 ]</h3><div class="d">国内访问 YouTube 必需，填代理服务器地址（YouTube 解析下载与封面均走此代理）</div>
+      <div class="sr"><label>代理地址</label><input type="text" id="ytIn" placeholder="http://127.0.0.1:7892"></div>
+      <div class="sr"><label></label><button class="btn sm primary" onclick="saveYt()">保存代理</button><span class="masked" id="ytMask">未设置</span></div>
+    </div>
+    <div class="glass sgrp">
       <h3>[ 系统 ]</h3>
       <div class="sr"><label>程序版本</label><span class="masked" id="sVer">-</span></div>
       <div class="sr"><label>控制台窗口</label><button class="btn sm" id="conB" onclick="toggleCon()">显示</button><span style="color:var(--faint);font-size:12px">切换后台控制台可见性</span></div>
@@ -592,12 +597,14 @@ async function clearLogs(){try{await api("/api/logs",{method:"DELETE"});refreshL
 
 /* ===== 系统设置 ===== */
 async function initSet(){try{const c=await api("/api/config");$("#sVer").textContent=(c.version||"dev")+" · "+(c.platform||"");$("#sDir").value=c.download_dir||""}catch(e){}
- try{const b=await api("/api/bilibili/cookie");$("#biliMask").textContent=b.has_cookie?(b.cookie_masked||"已设置"):"未设置"}catch(e){}}
+ try{const b=await api("/api/bilibili/cookie");$("#biliMask").textContent=b.has_cookie?(b.cookie_masked||"已设置"):"未设置"}catch(e){}
+ try{const s=await api("/api/settings");$("#ytIn").value=s.yt_proxy||"";$("#ytMask").textContent=s.yt_proxy?"已设置":"未设置"}catch(e){}}
 async function browseDir(){try{const r=await api("/api/browse-folder",{method:"POST"});if(r.path)$("#sDir").value=r.path}catch(e){toast(e.message,"err")}}
 async function saveDir(){try{await api("/api/download-dir",{method:"POST",body:JSON.stringify({path:$("#sDir").value.trim()})});toast("目录已保存")}catch(e){toast(e.message,"err")}}
 async function saveBili(){try{await api("/api/bilibili/cookie",{method:"POST",body:JSON.stringify({cookie:$("#biliIn").value.trim()})});toast("B站 Cookie 已保存");initSet()}catch(e){toast(e.message,"err")}}
 async function scanLogin(){const b=$("#scanB");b.disabled=true;b.textContent="等待扫码…";try{const r=await api("/api/bilibili/login",{method:"POST"});toast(r.success?"登录成功":"未完成："+(r.message||""),r.success?"":"warn");initSet()}catch(e){toast(e.message,"err")}finally{b.disabled=false;b.textContent="扫码登录（拉起窗口）"}}
 async function saveDy(){try{await api("/api/settings",{method:"POST",body:JSON.stringify({douyin_cookie:$("#dyIn").value.trim()})});toast("抖音 Cookie 已保存")}catch(e){toast(e.message,"err")}}
+async function saveYt(){try{await api("/api/settings",{method:"POST",body:JSON.stringify({yt_proxy:$("#ytIn").value.trim()})});toast("YouTube 代理已保存，即刻生效");initSet()}catch(e){toast(e.message,"err")}}
 async function toggleCon(){try{const v=await api("/api/console/visible");await api("/api/console/toggle",{method:"POST",body:JSON.stringify({show:!v.visible})});syncCon()}catch(e){toast(e.message,"err")}}
 async function syncCon(){try{const v=await api("/api/console/visible");$("#conB").textContent=v.visible?"隐藏":"显示"}catch(e){}}
 async function chkUpd(){toast("正在检查更新…");try{const r=await api("/api/update",{method:"POST"});toast(r.message||r.error||"完成")}catch(e){toast(e.message,"err")}}

@@ -1783,6 +1783,7 @@ func (h *Handlers) SaveSettings(c *gin.Context) {
 	var req struct {
 		BilibiliCookie string `json:"bilibili_cookie"`
 		DouyinCookie   string `json:"douyin_cookie"`
+		YtProxy        string `json:"yt_proxy"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"detail": "无效请求"})
@@ -1800,8 +1801,21 @@ func (h *Handlers) SaveSettings(c *gin.Context) {
 		h.douyinCollection.SetCookies(req.DouyinCookie)
 		h.mgr.SetDouyinCookie(req.DouyinCookie)
 	}
+	if req.YtProxy != "" {
+		h.cfg.YtProxy = strings.TrimSpace(req.YtProxy)
+		h.cfg.Save()
+		h.addLog("INFO", "", "YouTube代理已更新: "+h.cfg.YtProxy)
+	}
 	h.cfg.Save()
 	c.JSON(http.StatusOK, gin.H{"message": "设置已保存"})
+}
+
+// GetSettings 读取可展示的设置项(代理地址非机密, 明文返回)
+func (h *Handlers) GetSettings(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"yt_proxy":     h.cfg.YtProxy,
+		"proxy":        h.cfg.Proxy,
+	})
 }
 
 // ==================== Helpers ====================
