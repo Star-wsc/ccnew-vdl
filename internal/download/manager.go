@@ -218,6 +218,12 @@ func (m *Manager) ExecuteTask(ctx context.Context, taskID string) {
 				if parsed.AudioURL != "" {
 					videoInfo.AudioURL = parsed.AudioURL
 				}
+				if len(parsed.VideoURLs) > 0 {
+					videoInfo.VideoURLs = parsed.VideoURLs
+				}
+				if len(parsed.AudioURLs) > 0 {
+					videoInfo.AudioURLs = parsed.AudioURLs
+				}
 				// B站: 用API返回的真实清晰度(不是APP传来的请求参数)
 				if parsed.Quality != "" {
 					videoInfo.Quality = parsed.Quality
@@ -612,13 +618,15 @@ func (m *Manager) parseVideo(url, quality string) (*videoInfo, error) {
 			actualQuality = quality
 		}
 		return &videoInfo{
-			Title:    info.Title,
-			Author:   info.Author,
-			CoverURL: info.CoverURL,
-			VideoURL: info.VideoURL,
-			AudioURL: info.AudioURL,
-			Platform: "bilibili",
-			Quality:  actualQuality,
+			Title:     info.Title,
+			Author:    info.Author,
+			CoverURL:  info.CoverURL,
+			VideoURL:  info.VideoURL,
+			AudioURL:  info.AudioURL,
+			VideoURLs: info.VideoURLs,
+			AudioURLs: info.AudioURLs,
+			Platform:  "bilibili",
+			Quality:   actualQuality,
 		}, nil
 
 	case "douyin":
@@ -673,19 +681,25 @@ func (m *Manager) ytProxy() string {
 }
 
 type videoInfo struct {
-	Title    string
-	Author   string
-	CoverURL string
-	VideoURL string
-	AudioURL string
-	Platform string
-	Quality  string
+	Title     string
+	Author    string
+	CoverURL  string
+	VideoURL  string
+	AudioURL  string
+	VideoURLs []string // 候选视频URL(含backup, B站CDN 403时自动切换)
+	AudioURLs []string // 候选音频URL
+	Platform  string
+	Quality   string
 }
 
 func (m *Manager) downloadVideo(info *videoInfo, outputPath string, progressFunc func(int64, int64)) error {
 	switch info.Platform {
 	case "bilibili":
 		if info.AudioURL != "" {
+			// 有候选URL列表时用DownloadWithMergeURLs(403自动切backup)
+			if len(info.VideoURLs) > 0 && len(info.AudioURLs) > 0 {
+				return m.bilibiliDownloader.DownloadWithMergeURLs(info.VideoURLs, info.AudioURLs, outputPath, progressFunc)
+			}
 			return m.bilibiliDownloader.DownloadWithMerge(info.VideoURL, info.AudioURL, outputPath, progressFunc)
 		}
 		return m.bilibiliDownloader.Download(info.VideoURL, outputPath, progressFunc)
