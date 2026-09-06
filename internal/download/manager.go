@@ -124,8 +124,9 @@ func (m *Manager) loadTasks() {
 			task.Status = StatusFailed
 			task.ErrorMessage = "服务器重启，任务中断"
 		}
-		// 启动时批量修正已完成任务的清晰度标签（老任务可能虚标4k/1080p）
-		if task.Status == StatusCompleted && task.FilePath != "" {
+		// 启动时批量修正抖音已完成任务的清晰度标签（老任务可能虚标4k/1080p）
+		// B站/YouTube不修正: B站API返回真实清晰度(actualQn), YouTube由yt-dlp选择
+		if task.Status == StatusCompleted && task.FilePath != "" && task.Platform == "douyin" {
 			if actual := detectActualQuality(task.FilePath); actual != "" && actual != task.Quality {
 				log.Printf("[启动修正] %s: %s → %s", task.Title, task.Quality, actual)
 				task.Quality = actual
@@ -358,10 +359,13 @@ func (m *Manager) ExecuteTask(ctx context.Context, taskID string) {
 	task.Progress = 100
 	task.Speed = 0
 	task.UpdatedAt = time.Now()
-	// 用ffprobe检测真实分辨率，校正质量标签（抖音API的gear_name常虚标）
-	if actual := detectActualQuality(outputPath); actual != "" {
-		task.Quality = actual
-		log.Printf("[真实质量] %s: 文件实际分辨率→%s (原标注:%s)", task.Title, actual, task.Quality)
+	// 只对抖音做ffprobe后验（抖音API的gear_name常虚标）;
+	// B站API返回的清晰度是真实的(actualQn), YouTube由yt-dlp选择, 均不覆盖。
+	if task.Platform == "douyin" {
+		if actual := detectActualQuality(outputPath); actual != "" && actual != task.Quality {
+			log.Printf("[真实质量] %s: %s → %s", task.Title, task.Quality, actual)
+			task.Quality = actual
+		}
 	}
 	m.mu.Unlock()
 
@@ -381,7 +385,7 @@ func detectActualQuality(path string) string {
 	if _, err := fmt.Sscanf(strings.TrimSpace(string(out)), "%d,%d", &w, &h); err != nil {
 		return ""
 	}
-	// 竖屏视频取较大边
+	// 取较大边作为实际分辨率（兼容横竖屏）
 	maxDim := w
 	if h > maxDim {
 		maxDim = h
@@ -395,7 +399,7 @@ func detectActualQuality(path string) string {
 		return "1080p"
 	case maxDim >= 1280:
 		return "720p"
-	case maxDim >= 854:
+	case maxDim >= 640:
 		return "480p"
 	default:
 		return "360p"
