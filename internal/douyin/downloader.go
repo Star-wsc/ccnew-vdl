@@ -106,12 +106,14 @@ func (d *DouyinDownloader) Parse(rawURL string) (*models.VideoInfo, error) {
 
 // parseWithMobileUA 使用移动端UA解析（关键策略）
 func (d *DouyinDownloader) parseWithMobileUA(videoURL string) (*models.VideoInfo, error) {
-	// 使用与原始项目相同的移动端UA
+	// 网页解析用浏览器移动端UA（APP UA请求网页返回不同结构，解析不到renderData）
+	// 高清流由 parseDetailAPI 的 APP UA 负责（enrichAudioURL 调用）
 	mobileUA := "Mozilla/5.0 (Linux; Android 10; SM-G981B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
 	return d.parseWithUA(videoURL, mobileUA)
 }
 
 func (d *DouyinDownloader) parseWithAlternateUA(videoURL string) (*models.VideoInfo, error) {
+	// APP UA用于Detail API(高清)，网页解析用浏览器UA
 	userAgents := []string{
 		"com.ss.android.ugc.aweme/330201 (Linux; U; Android 13; zh_CN; SM-G991B; Build/TP1A.220624.014)",
 		"Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X; zh_CN; Scale/3.00)",
@@ -368,8 +370,8 @@ func (d *DouyinDownloader) DownloadVideo(videoURL, outputPath string, cookies ma
 		return err
 	}
 
-	// 设置抖音视频下载专用请求头
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+	// 设置抖音视频下载专用请求头（APP UA + Referer 必须，否则CDN返回403）
+	req.Header.Set("User-Agent", douyinAppUA)
 	req.Header.Set("Referer", "https://www.douyin.com/")
 	req.Header.Set("Accept", "*/*")
 	req.Header.Set("Accept-Encoding", "identity")

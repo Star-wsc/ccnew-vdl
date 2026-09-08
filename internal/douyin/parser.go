@@ -16,6 +16,12 @@ import (
 
 var douyinCookieWarningLogged bool
 
+// UA常量: APP UA解锁高清(4K), 桌面UA作为兜底
+const (
+	douyinAppUA = "com.ss.android.ugc.aweme/280000 (Linux; U; Android 14; zh_CN; Pixel 8 Pro; Build/AP2A.240405.002;)"
+	desktopUA   = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+)
+
 type Parser struct {
 	client  *http.Client
 	cookies string
@@ -356,7 +362,15 @@ func (p *Parser) extractVideoURLs(videoData map[string]interface{}) map[string]s
 	urls := make(map[string]string)
 
 	bitRate, _ := videoData["bit_rate"].([]interface{})
-	bitRateQualities := make(map[string]string)
+
+	// 同一清晰度有多条bit_rate条目(如 adapt_lowest_4_1 vs normal_4_0)，
+	// 按码率从高到低排: normal_* > adapt_*，同gear_name取码率最高的
+	type brEntry struct {
+		quality string
+		url     string
+		bitrate float64
+	}
+	var entries []brEntry
 
 	for _, br := range bitRate {
 		brMap, ok := br.(map[string]interface{})
@@ -368,6 +382,7 @@ func (p *Parser) extractVideoURLs(videoData map[string]interface{}) map[string]s
 		qualityType, _ := brMap["quality_type"].(float64)
 		width, _ := brMap["width"].(float64)
 		height, _ := brMap["height"].(float64)
+		bitRateVal, _ := brMap["bit_rate"].(float64)
 
 		brPlayAddr, _ := brMap["play_addr"].(map[string]interface{})
 		if brPlayAddr == nil {
@@ -381,13 +396,20 @@ func (p *Parser) extractVideoURLs(videoData map[string]interface{}) map[string]s
 
 			q := mapQualityAdvanced(gearName, qualityType, int(width), int(height))
 			if q != "" {
-				bitRateQualities[q] = u
+				entries = append(entries, brEntry{quality: q, url: u, bitrate: bitRateVal})
 			}
 		}
 	}
 
-	for q, u := range bitRateQualities {
-		urls[q] = u
+	// 同清晰度取码率最高的条目（normal_4_0 > adapt_lowest_4_1）
+	bestForQuality := make(map[string]brEntry)
+	for _, e := range entries {
+		if existing, ok := bestForQuality[e.quality]; !ok || e.bitrate > existing.bitrate {
+			bestForQuality[e.quality] = e
+		}
+	}
+	for _, e := range bestForQuality {
+		urls[e.quality] = e.url
 	}
 
 	if bitRateAudio, ok := videoData["bit_rate_audio"].([]interface{}); ok && len(bitRateAudio) > 0 {
@@ -551,7 +573,7 @@ func (p *Parser) parseDetailAPI(videoID string) (*models.VideoInfo, error) {
 		return nil, err
 	}
 
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+	req.Header.Set("User-Agent", douyinAppUA)
 	req.Header.Set("Referer", fmt.Sprintf("https://www.douyin.com/video/%s", videoID))
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9")
@@ -573,6 +595,17 @@ func (p *Parser) parseDetailAPI(videoID string) (*models.VideoInfo, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
+
+	// APP UA 被风控时降级到桌面 UA 重试
+	if resp.StatusCode != 200 {
+		resp.Body.Close()
+		req.Header.Set("User-Agent", desktopUA)
+		resp, err = p.client.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+	}
 
 	if resp.StatusCode != 200 {
 		return nil, fmt.Errorf("API returned status %d", resp.StatusCode)
