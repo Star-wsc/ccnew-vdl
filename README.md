@@ -6,7 +6,7 @@
   <a href="https://hub.docker.com/r/wsc768043912/ccnew-vdl"><img alt="Docker" src="https://img.shields.io/docker/pulls/wsc768043912/ccnew-vdl?label=Docker%20Pulls"></a>
 </p>
 
-**DouBi（抖B）** —— 抖音 + B站视频下载器。支持单视频与合集批量下载、DASH 音视频自动合并、订阅自动追更。一套 Go 服务端跑在 NAS / 电脑上，全家设备共用：浏览器 Web 控制台、Windows 桌面版、Android APP。
+**DouBi（抖B）** —— 抖音 + B站 + YouTube 视频下载器。支持单视频与合集批量下载、DASH 音视频自动合并、订阅自动追更。一套 Go 服务端跑在 NAS / 电脑上，全家设备共用：浏览器 Web 控制台、Windows 桌面版、Android APP。
 
 > ⚠️ 仅供个人学习研究，请勿用于商业用途，下载内容版权归原作者所有。
 
@@ -17,8 +17,9 @@
 **服务端（所有客户端共用）**
 - 🎬 抖音单视频 / 合集解析下载，多策略解析 + 自动重试，无需登录即可下载
 - 📺 B站视频下载，支持 4K/2K/1080p（清晰度取决于账号权限，DASH 自动合并音视频）
+- 🔴 YouTube 视频下载（基于 yt-dlp 引擎），支持最高 4K，自动更新引擎
 - 📚 合集批量下载 + **订阅模式**：自动检查 UP 主更新并追新
-- 🔗 短链支持：`v.douyin.com`、`b23.tv` 分享链接直接粘贴
+- 🔗 短链支持：`v.douyin.com`、`b23.tv`、`youtu.be` 分享链接直接粘贴
 - 🌐 Web 控制台：粘贴链接、进度监控、合集管理、**在线播放**（支持拖动进度）
 
 **Android APP（DouBi）**
@@ -75,12 +76,13 @@ docker run -d --name douby -p 18000:18000 \
 |---|---|---|
 | B站 | 最高 480P/720P | 账号可用最高画质（大会员 4K） |
 | 抖音 | 大部分视频可下 | 解析更稳、部分视频解锁 |
+| YouTube | 需配置代理（国内网络） | 直接使用，最高 4K |
 
 配置方式任选：
-1. Web 控制台 → 设置 → 粘贴 Cookie
-2. docker-compose.yml 里填 `BILIBILI_COOKIE` / `DOUYIN_COOKIE` 环境变量
+1. Web 控制台 → 设置 → 粘贴 Cookie / 填代理地址
+2. docker-compose.yml 里填 `BILIBILI_COOKIE` / `DOUYIN_COOKIE` / `YT_PROXY` 环境变量
 
-获取方法：浏览器登录 B站/抖音 → F12 开发者工具 → Network → 复制请求头中完整的 `Cookie` 值。
+获取方法：浏览器登录 B站/抖音 → F12 开发者工具 → Network → 复制请求头中完整的 `Cookie` 值。YouTube 需要配置 HTTP 代理地址（国内网络）。
 
 ---
 
@@ -91,6 +93,7 @@ docker run -d --name douby -p 18000:18000 \
 Windows 桌面版    ─┼──→ Go 服务端 (Docker/裸跑)
 Android APP      ─┘         │
                             ├─ 抖音/B站解析（多策略+重试）
+                            ├─ YouTube 引擎（yt-dlp，自动更新）
                             ├─ DASH 下载 + FFmpeg 合并
                             └─ 合集管理 / 订阅刷新 / 操作日志
 ```
