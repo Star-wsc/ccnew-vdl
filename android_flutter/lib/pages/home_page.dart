@@ -218,14 +218,19 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       debugPrint('[DouBi] 创建任务: ${preview['title']}');
       final task = await ApiService.createFromPreview(preview);
       debugPrint('[DouBi] 创建结果: ${task != null ? "成功 ${task['id']}" : "失败"}');
+      // 乐观更新：立即插到列表顶部，不等服务器返回
+      if (task != null && mounted) {
+        setState(() => _tasks.insert(0, task));
+        LocalStore.saveTasks(_tasks);
+      }
     } else if (result['action'] == 'collection') {
       // 合集：用选中的索引创建
       final col = result['collection'] as Map<String, dynamic>;
       final indices = result['selectedIndices'] as List<dynamic>?;
       await ApiService.createCollection(col, selectedIndices: indices?.cast<int>());
     }
-    // 立即刷新，不等下一轮轮询
-    _refresh(force: true); // 操作后立即刷新
+    // 后台刷新一次同步服务器真实状态（不阻塞UI）
+    _refresh(force: true);
   }
 
   Future<void> _downloadToGallery(dynamic task) async {
