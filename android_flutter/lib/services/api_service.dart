@@ -95,10 +95,13 @@ class ApiService {
     }
   }
 
-  static Future<void> deleteTask(String id, {bool deleteFile = true}) async {
+  static Future<bool> deleteTask(String id, {bool deleteFile = true}) async {
     try {
       await http.delete(Uri.parse('$baseUrl/api/tasks/$id?deleteFile=$deleteFile'));
-    } catch (_) {}
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 
   static Future<void> retryTask(String id) async {

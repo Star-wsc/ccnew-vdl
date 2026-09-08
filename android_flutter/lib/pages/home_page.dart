@@ -315,7 +315,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 }),
               _menuButton(Icons.delete_rounded, '删除任务', red, () {
                 Navigator.pop(context);
-                ApiService.deleteTask(id, deleteFile: true);
+                _confirmDelete(id, title, deleteFile: true);
               }),
               const SizedBox(height: 8),
               TextButton(
@@ -353,6 +353,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     );
     if (confirmed == true) {
       await ApiService.deleteTask(id, deleteFile: deleteFile);
+      // 不管服务器是否成功，都从本地列表移除（乐观删除）
+      if (mounted) {
+        setState(() => _tasks.removeWhere((t) => t['id'] == id));
+        LocalStore.saveTasks(_tasks);
+      }
     }
   }
 
@@ -379,7 +384,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       for (final id in _selected.toList()) {
         await ApiService.deleteTask(id, deleteFile: true);
       }
-      setState(() { _selected.clear(); _multiSelect = false; });
+      setState(() {
+        _tasks.removeWhere((t) => _selected.contains(t['id']));
+        _selected.clear();
+        _multiSelect = false;
+      });
+      LocalStore.saveTasks(_tasks);
     }
   }
 
