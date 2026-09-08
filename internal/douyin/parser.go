@@ -478,22 +478,27 @@ func (p *Parser) extractVideoURLs(videoData map[string]interface{}) map[string]s
 }
 
 func mapQualityAdvanced(gearName string, qualityType float64, width, height int) string {
-	if height >= 2160 || width >= 3840 {
+	// 取较大边判断: 竖屏576x1080的较大边是1080=1080P
+	maxDim := width
+	if height > maxDim {
+		maxDim = height
+	}
+	if maxDim >= 2160 {
 		return "4k"
 	}
-	if height >= 1440 || width >= 2560 {
+	if maxDim >= 1440 {
 		return "2k"
 	}
-	if height >= 1080 || width >= 1920 {
+	if maxDim >= 1080 {
 		return "1080p"
 	}
-	if height >= 720 || width >= 1280 {
+	if maxDim >= 720 {
 		return "720p"
 	}
-	if height >= 480 || width >= 854 {
+	if maxDim >= 480 {
 		return "480p"
 	}
-	if height >= 360 || width >= 640 {
+	if maxDim >= 360 {
 		return "360p"
 	}
 
