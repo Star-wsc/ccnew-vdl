@@ -617,21 +617,21 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             ),
             const SizedBox(width: 4),
           ],
-          // 封面
-          if (cover.isNotEmpty) ...[
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: Stack(children: [
-                Image.network(ApiService.coverSrc(cover), width: 72, height: 72, fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => Container(width: 72, height: 72, color: const Color(0x0DFFFFFF))),
-                if (platform.isNotEmpty)
-                  Positioned(bottom: 4, left: 4, child: _tag(
-                    _platName(platform),
-                    _platColor(platform))),
-              ]),
-            ),
-            const SizedBox(width: 12),
-          ],
+          // 封面（无封面时显示平台图标占位）
+          ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: Stack(children: [
+              cover.isNotEmpty
+                ? Image.network(ApiService.coverSrc(cover), width: 72, height: 72, fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => _coverPlaceholder(platform))
+                : _coverPlaceholder(platform),
+              if (platform.isNotEmpty)
+                Positioned(bottom: 4, left: 4, child: _tag(
+                  _platName(platform),
+                  _platColor(platform))),
+            ]),
+          ),
+          const SizedBox(width: 12),
           // 标题区
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(title, style: TextStyle(color: text1, fontSize: 14, fontWeight: FontWeight.w600, height: 1.4),
@@ -1134,3 +1134,16 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     return '$bytes B/s';
   }
 }
+
+  /// 封面占位：平台色背景 + 平台图标
+  Widget _coverPlaceholder(String platform) {
+    final color = platform == 'bilibili' ? const Color(0xFF00A1D6)
+        : platform == 'youtube' ? const Color(0xFFFF0000)
+        : const Color(0xFF161823);
+    final icon = platform == 'bilibili' ? 'B'
+        : platform == 'youtube' ? 'Y'
+        : 'D';
+    return Container(width: 72, height: 72, color: color,
+      alignment: Alignment.center,
+      child: Text(icon, style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w900)));
+  }
