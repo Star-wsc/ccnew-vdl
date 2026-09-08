@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/Star-wsc/ccnew-vdl/internal/crypto"
 )
 
 type Config struct {
@@ -53,11 +55,17 @@ func Load() *Config {
 						cfg.DownloadDir = fileCfg.DownloadDir
 					}
 					if fileCfg.BilibiliCookie != "" {
-						cfg.BilibiliCookie = sanitizeCookie(fileCfg.BilibiliCookie)
+						if decrypted, err := crypto.Decrypt(sanitizeCookie(fileCfg.BilibiliCookie)); err == nil {
+							cfg.BilibiliCookie = decrypted
+						}
 					}
 					if fileCfg.DouyinCookie != "" {
-						cfg.DouyinCookie = sanitizeCookie(fileCfg.DouyinCookie)
+						if decrypted, err := crypto.Decrypt(sanitizeCookie(fileCfg.DouyinCookie)); err == nil {
+							cfg.DouyinCookie = decrypted
+						}
 					}
+					cfg.BilibiliCookieAt = fileCfg.BilibiliCookieAt
+					cfg.DouyinCookieAt = fileCfg.DouyinCookieAt
 					if fileCfg.Proxy != "" {
 						cfg.Proxy = fileCfg.Proxy
 					}
@@ -95,7 +103,15 @@ func Load() *Config {
 }
 
 func (c *Config) Save() error {
-	data, err := json.MarshalIndent(c, "", "  ")
+	// 保存时加密Cookie字段
+	saved := *c
+	if encrypted, err := crypto.Encrypt(c.BilibiliCookie); err == nil {
+		saved.BilibiliCookie = encrypted
+	}
+	if encrypted, err := crypto.Encrypt(c.DouyinCookie); err == nil {
+		saved.DouyinCookie = encrypted
+	}
+	data, err := json.MarshalIndent(saved, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -104,7 +120,7 @@ func (c *Config) Save() error {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
-	// 0600：配置含 Cookie，仅限当前用户可读
+	// 0600：配置含密文，仅限当前用户可读
 	return os.WriteFile(configFile, data, 0600)
 }
 
