@@ -347,16 +347,42 @@ func uniqueStrings(items []string) []string {
 	return result
 }
 func qualityName(qn int) string {
-	switch {
-	case qn >= 120:
+	switch qn {
+	case 127:
+		return "4K HDR"
+	case 126:
+		return "4K 60帧"
+	case 125:
+		return "4K HDR"
+	case 120:
 		return "4K"
-	case qn >= 80:
+	case 116:
+		return "1080P 60帧"
+	case 112:
+		return "1080P 高码率"
+	case 80:
 		return "1080P"
-	case qn >= 64:
+	case 74:
+		return "720P 60帧"
+	case 64:
 		return "720P"
-	case qn >= 32:
+	case 32:
 		return "480P"
-	default:
+	case 16:
 		return "360P"
+	default:
+		// 范围兜底：B站可能新增未知qn
+		switch {
+		case qn >= 120:
+			return "4K"
+		case qn >= 80:
+			return "1080P"
+		case qn >= 64:
+			return "720P"
+		case qn >= 32:
+			return "480P"
+		default:
+			return "360P"
+		}
 	}
 }

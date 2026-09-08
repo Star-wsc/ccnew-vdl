@@ -250,9 +250,15 @@ func (m *Manager) ExecuteTask(ctx context.Context, taskID string) {
 		task.Progress = 100
 		task.Speed = 0
 		task.UpdatedAt = time.Now()
+		// 抖音API的definition有时虚标，用文件实际分辨率确认；B站/YouTube不覆盖
+		if task.Platform == "douyin" {
+			if actual := detectActualQuality(outputPath); actual != "" {
+				task.Quality = actual
+			}
+		}
 		m.mu.Unlock()
 		m.saveTasks()
-		m.emit("INFO", taskID, "下载完成: %s (%s)", task.Title, humanSize(fileInfo))
+		m.emit("INFO", taskID, "下载完成: %s (%s, %s)", task.Title, humanSize(fileInfo), task.Quality)
 		return
 	}
 
@@ -354,9 +360,15 @@ func (m *Manager) ExecuteTask(ctx context.Context, taskID string) {
 	task.Progress = 100
 	task.Speed = 0
 	task.UpdatedAt = time.Now()
-	// 用downloadVideo返回的实际清晰度（API definition值），不用优先级循环的选中结果
-	if videoInfo.Quality != "" && videoInfo.Quality != task.Quality {
+	// 用API返回的实际清晰度
+	if videoInfo.Quality != "" {
 		task.Quality = videoInfo.Quality
+	}
+	// 抖音API definition有时虚标，用文件实际分辨率确认；B站/YouTube不覆盖
+	if task.Platform == "douyin" {
+		if actual := detectActualQuality(outputPath); actual != "" {
+			task.Quality = actual
+		}
 	}
 	m.mu.Unlock()
 
@@ -634,8 +646,9 @@ func (m *Manager) parseVideo(url, quality string) (*videoInfo, error) {
 		if err != nil {
 			return nil, err
 		}
-		actualQuality := quality
-		if actualQuality == "" || actualQuality == "preview" {
+		// 用yt-dlp返回的实际分辨率+帧率生成标签，不自己推断
+		actualQuality := youtubeQualityName(ytInfo.Height, ytInfo.Fps)
+		if actualQuality == "" {
 			actualQuality = "1080p"
 		}
 		return &videoInfo{
@@ -924,4 +937,29 @@ func (m *Manager) pickBestDouyinStream(videoURLs map[string]string) (string, str
 		}
 	}
 	return "", ""
+}
+
+// youtubeQualityName 根据yt-dlp返回的实际height+fps生成标签
+func youtubeQualityName(height, fps int) string {
+	if height <= 0 {
+		return ""
+	}
+	fpsTag := ""
+	if fps >= 50 {
+		fpsTag = " 60fps"
+	}
+	switch {
+	case height >= 2160:
+		return "4K" + fpsTag
+	case height >= 1440:
+		return "2K" + fpsTag
+	case height >= 1080:
+		return "1080p" + fpsTag
+	case height >= 720:
+		return "720p" + fpsTag
+	case height >= 480:
+		return "480p"
+	default:
+		return "360p"
+	}
 }

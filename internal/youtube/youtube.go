@@ -62,6 +62,8 @@ type VideoInfo struct {
 	Uploader    string `json:"uploader"`
 	Thumbnail   string `json:"thumbnail"`
 	DurationSec int    `json:"duration"`
+	Height      int    `json:"height"`
+	Fps         int    `json:"fps"`
 }
 
 func baseArgs(proxy string) []string {
