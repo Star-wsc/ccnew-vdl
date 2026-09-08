@@ -8,13 +8,15 @@ import (
 )
 
 type Config struct {
-	Port           string `json:"port"`
-	DownloadDir    string `json:"download_dir"`
-	LogDir         string `json:"log_dir"`
-	BilibiliCookie string `json:"bilibili_cookie"`
-	DouyinCookie   string `json:"douyin_cookie"`
-	Proxy          string `json:"proxy"`
-	YtProxy        string `json:"yt_proxy"` // YouTube专用代理(国内访问YouTube需要)，空则回退Proxy
+	Port              string `json:"port"`
+	DownloadDir       string `json:"download_dir"`
+	LogDir            string `json:"log_dir"`
+	BilibiliCookie    string `json:"bilibili_cookie"`
+	BilibiliCookieAt  string `json:"bilibili_cookie_at,omitempty"` // 保存日期 ISO8601
+	DouyinCookie      string `json:"douyin_cookie"`
+	DouyinCookieAt    string `json:"douyin_cookie_at,omitempty"`
+	Proxy             string `json:"proxy"`
+	YtProxy           string `json:"yt_proxy"` // YouTube专用代理(国内访问YouTube需要)，空则回退Proxy
 }
 
 func Load() *Config {

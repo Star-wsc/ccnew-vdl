@@ -315,7 +315,11 @@ func (h *Handlers) GetBilibiliCookie(c *gin.Context) {
 	} else if len(cookie) > 0 {
 		masked = cookie[:5] + "..."
 	}
-	c.JSON(http.StatusOK, gin.H{"cookie_masked": masked, "has_cookie": cookie != ""})
+	c.JSON(http.StatusOK, gin.H{
+		"cookie_masked": masked,
+		"has_cookie":    cookie != "",
+		"saved_at":      h.cfg.BilibiliCookieAt,
+	})
 }
 
 func (h *Handlers) SetBilibiliCookie(c *gin.Context) {
@@ -327,6 +331,7 @@ func (h *Handlers) SetBilibiliCookie(c *gin.Context) {
 		return
 	}
 	h.cfg.BilibiliCookie = req.Cookie
+	h.cfg.BilibiliCookieAt = time.Now().Format("2006-01-02 15:04")
 	h.cfg.Save()
 	h.bilibiliParser.SetCookies(req.Cookie)
 	h.bilibiliCollection.SetCookies(req.Cookie)
@@ -1792,12 +1797,14 @@ func (h *Handlers) SaveSettings(c *gin.Context) {
 	}
 	if req.BilibiliCookie != "" {
 		h.cfg.BilibiliCookie = req.BilibiliCookie
+		h.cfg.BilibiliCookieAt = time.Now().Format("2006-01-02 15:04")
 		h.bilibiliParser.SetCookies(req.BilibiliCookie)
 		h.bilibiliCollection.SetCookies(req.BilibiliCookie)
 		h.mgr.SetBilibiliCookie(req.BilibiliCookie)
 	}
 	if req.DouyinCookie != "" {
 		h.cfg.DouyinCookie = req.DouyinCookie
+		h.cfg.DouyinCookieAt = time.Now().Format("2006-01-02 15:04")
 		h.douyinParser.SetCookies(req.DouyinCookie)
 		h.douyinCollection.SetCookies(req.DouyinCookie)
 		h.mgr.SetDouyinCookie(req.DouyinCookie)
@@ -1814,9 +1821,71 @@ func (h *Handlers) SaveSettings(c *gin.Context) {
 // GetSettings 读取可展示的设置项(代理地址非机密, 明文返回)
 func (h *Handlers) GetSettings(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
-		"yt_proxy":     h.cfg.YtProxy,
-		"proxy":        h.cfg.Proxy,
+		"yt_proxy":           h.cfg.YtProxy,
+		"proxy":              h.cfg.Proxy,
+		"bilibili_cookie_at": h.cfg.BilibiliCookieAt,
+		"douyin_cookie_at":   h.cfg.DouyinCookieAt,
 	})
+}
+
+// ValidateCookie 校验Cookie有效性(B站/抖音)
+func (h *Handlers) ValidateCookie(c *gin.Context) {
+	platform := c.Query("platform")
+	switch platform {
+	case "bilibili":
+		cookie := h.cfg.BilibiliCookie
+		if cookie == "" {
+			c.JSON(http.StatusOK, gin.H{"valid": false, "message": "未配置"})
+			return
+		}
+		req, _ := http.NewRequest("GET", "https://api.bilibili.com/x/web-interface/nav", nil)
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+		req.Header.Set("Referer", "https://www.bilibili.com")
+		req.Header.Set("Cookie", cookie)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"valid": false, "message": "网络错误"})
+			return
+		}
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(resp.Body)
+		var result struct {
+			Code int `json:"code"`
+			Data struct {
+				IsLogin   bool   `json:"isLogin"`
+				VipType   int    `json:"vipType"`
+				Uname     string `json:"uname"`
+				VipDueDate int64 `json:"vipDueDate"`
+			} `json:"data"`
+		}
+		json.Unmarshal(body, &result)
+		if result.Code == 0 && result.Data.IsLogin {
+			msg := "已登录: " + result.Data.Uname
+			if result.Data.VipType > 0 {
+				msg += " (大会员)"
+			}
+			c.JSON(http.StatusOK, gin.H{"valid": true, "message": msg})
+		} else {
+			c.JSON(http.StatusOK, gin.H{"valid": false, "message": "Cookie已失效，请重新登录"})
+		}
+
+	case "douyin":
+		cookie := h.cfg.DouyinCookie
+		if cookie == "" {
+			c.JSON(http.StatusOK, gin.H{"valid": false, "message": "未配置"})
+			return
+		}
+		// 抖音用ttwid检测：有ttwid即可用
+		hasTtwid := strings.Contains(cookie, "ttwid=")
+		if hasTtwid {
+			c.JSON(http.StatusOK, gin.H{"valid": true, "message": "Cookie有效"})
+		} else {
+			c.JSON(http.StatusOK, gin.H{"valid": false, "message": "缺少ttwid，建议重新获取"})
+		}
+
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "platform参数必填"})
+	}
 }
 
 // YTDLPInfo yt-dlp引擎状态

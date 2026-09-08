@@ -181,6 +181,7 @@ func main() {
 	r.DELETE("/api/logs", h.ClearLogs)
 	r.POST("/api/settings", h.SaveSettings)
 	r.GET("/api/settings", h.GetSettings)
+	r.GET("/api/cookie/validate", h.ValidateCookie)
 	r.GET("/api/ytdlp", h.YTDLPInfo)
 	r.POST("/api/ytdlp/update", h.YTDLPUpdate)
 	r.GET("/api/console/visible", h.GetConsoleVisible)
