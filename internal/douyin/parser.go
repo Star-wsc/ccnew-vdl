@@ -363,10 +363,9 @@ func (p *Parser) extractVideoURLs(videoData map[string]interface{}) map[string]s
 
 	bitRate, _ := videoData["bit_rate"].([]interface{})
 
-	// 同一清晰度有多条bit_rate条目(如 adapt_lowest_4_1 vs normal_4_0)，
-	// 按码率从高到低排: normal_* > adapt_*，同gear_name取码率最高的
+	// 直接用API返回的definition字段作为清晰度标识，不自己推断
 	type brEntry struct {
-		quality string
+		quality string // API definition值（"4k","1080p","720p"等）
 		url     string
 		bitrate float64
 	}
@@ -378,10 +377,6 @@ func (p *Parser) extractVideoURLs(videoData map[string]interface{}) map[string]s
 			continue
 		}
 
-		gearName, _ := brMap["gear_name"].(string)
-		qualityType, _ := brMap["quality_type"].(float64)
-		width, _ := brMap["width"].(float64)
-		height, _ := brMap["height"].(float64)
 		bitRateVal, _ := brMap["bit_rate"].(float64)
 		videoExtra, _ := brMap["video_extra"].(string)
 
@@ -395,19 +390,15 @@ func (p *Parser) extractVideoURLs(videoData map[string]interface{}) map[string]s
 			u, _ := brURLList[0].(string)
 			u = processVideoURL(u)
 
-			// 优先用video_extra里的definition字段(最准确的清晰度标识)
-			// 兜底用width/height判断
-			q := extractQualityFromExtra(videoExtra)
-			if q == "" {
-				q = mapQualityAdvanced(gearName, qualityType, int(width), int(height))
-			}
+			// 直接用API返回的definition字段
+			q := extractDefinition(videoExtra)
 			if q != "" {
 				entries = append(entries, brEntry{quality: q, url: u, bitrate: bitRateVal})
 			}
 		}
 	}
 
-	// 同清晰度取码率最高的条目（normal_4_0 > adapt_lowest_4_1）
+	// 同清晰度取码率最高的条目
 	bestForQuality := make(map[string]brEntry)
 	for _, e := range entries {
 		if existing, ok := bestForQuality[e.quality]; !ok || e.bitrate > existing.bitrate {
@@ -674,7 +665,8 @@ func (p *Parser) parseAwemeDetail(detail map[string]interface{}) *models.VideoIn
 
 	selectedURL := ""
 	selectedQuality := ""
-	qualityPriority := []string{"4k", "2k", "1080p", "720p", "480p"}
+	// 用API返回的definition字段排优先级
+	qualityPriority := []string{"4k", "2k", "1080p", "720p", "540p", "480p", "360p"}
 	for _, q := range qualityPriority {
 		if u, ok := videoURLs[q]; ok && u != "" {
 			selectedURL = u
@@ -682,19 +674,14 @@ func (p *Parser) parseAwemeDetail(detail map[string]interface{}) *models.VideoIn
 			break
 		}
 	}
+	// 兜底：取第一个非download的流
 	if selectedURL == "" {
 		for q, u := range videoURLs {
-			if q != "download" && q != "4k_h265" && u != "" {
+			if q != "download" && q != "_audio" && u != "" {
 				selectedURL = u
 				selectedQuality = q
 				break
 			}
-		}
-	}
-	if selectedURL == "" {
-		if u, ok := videoURLs["4k_h265"]; ok && u != "" {
-			selectedURL = u
-			selectedQuality = "4k"
 		}
 	}
 
@@ -897,10 +884,9 @@ func getKeys(m map[string]string) []string {
 	return keys
 }
 
-// extractQualityFromExtra 从video_extra JSON提取definition字段作为清晰度标识
-// 方案文档明确: definition是最准确的清晰度来源(如"4k","1080p","720p","540p")
-// 用Contains匹配: "4k_hdr" → "4k", "1080p_h265" → "1080p"
-func extractQualityFromExtra(extra string) string {
+// extractDefinition 直接读API返回的definition字段，原样返回
+// API说这是"4k"就是"4k"，说"1080p"就是"1080p"，不自己推断
+func extractDefinition(extra string) string {
 	if extra == "" {
 		return ""
 	}
@@ -909,24 +895,5 @@ func extractQualityFromExtra(extra string) string {
 		return ""
 	}
 	def, _ := m["definition"].(string)
-	if def == "" {
-		return ""
-	}
-	def = strings.ToLower(def)
-	switch {
-	case strings.Contains(def, "4k"):
-		return "4k"
-	case strings.Contains(def, "2k") || strings.Contains(def, "1440"):
-		return "2k"
-	case strings.Contains(def, "1080"):
-		return "1080p"
-	case strings.Contains(def, "720"):
-		return "720p"
-	case strings.Contains(def, "540") || strings.Contains(def, "480"):
-		return "480p"
-	case strings.Contains(def, "360"):
-		return "360p"
-	default:
-		return def
-	}
+	return strings.ToLower(strings.TrimSpace(def))
 }
