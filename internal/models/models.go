@@ -96,6 +96,7 @@ type VideoInfo struct {
 	CoverURL           string
 	VideoURL           string
 	AudioURL           string
+	VideoURLs          map[string]string // 抖音: definition→url 完整表（用于码率优选）
 	DownloadURL        string
 	SelectedQuality    string
 	AvailableQualities []string

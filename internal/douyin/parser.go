@@ -701,6 +701,7 @@ func (p *Parser) parseAwemeDetail(detail map[string]interface{}) *models.VideoIn
 		CoverURL:           coverURL,
 		VideoURL:           selectedURL,
 		AudioURL:           audioURL2,
+		VideoURLs:          videoURLs,
 		SelectedQuality:    selectedQuality,
 		AvailableQualities: getKeys(videoURLs),
 	}

@@ -117,31 +117,13 @@ func (m *Manager) loadTasks() {
 		return // 解析失败，忽略
 	}
 
-	corrected := 0
 	for _, task := range tasks {
 		// 重置进行中的任务状态为失败（因为服务器重启了）
 		if task.Status == StatusParsing || task.Status == StatusDownloading {
 			task.Status = StatusFailed
 			task.ErrorMessage = "服务器重启，任务中断"
 		}
-		// 启动时批量修正抖音已完成任务的清晰度标签（老任务可能虚标4k/1080p）
-		// B站/YouTube不修正: B站API返回真实清晰度(actualQn), YouTube由yt-dlp选择
-		if task.Status == StatusCompleted && task.FilePath != "" && task.Platform == "douyin" {
-			if actual := detectActualQuality(task.FilePath); actual != "" && actual != task.Quality {
-				log.Printf("[启动修正] %s: %s → %s", task.Title, task.Quality, actual)
-				task.Quality = actual
-				corrected++
-			}
-		}
 		m.tasks[task.ID] = task
-	}
-	if corrected > 0 {
-		log.Printf("[启动修正] 共修正%d条任务的清晰度标签", corrected)
-		// 修正后立即持久化
-		go func() {
-			time.Sleep(2 * time.Second) // 等待初始化完成
-			m.saveTasks()
-		}()
 	}
 }
 
@@ -372,13 +354,9 @@ func (m *Manager) ExecuteTask(ctx context.Context, taskID string) {
 	task.Progress = 100
 	task.Speed = 0
 	task.UpdatedAt = time.Now()
-	// 只对抖音做ffprobe后验（抖音API的gear_name常虚标）;
-	// B站API返回的清晰度是真实的(actualQn), YouTube由yt-dlp选择, 均不覆盖。
-	if task.Platform == "douyin" {
-		if actual := detectActualQuality(outputPath); actual != "" && actual != task.Quality {
-			log.Printf("[真实质量] %s: %s → %s", task.Title, task.Quality, actual)
-			task.Quality = actual
-		}
+	// 用downloadVideo返回的实际清晰度（API definition值），不用优先级循环的选中结果
+	if videoInfo.Quality != "" && videoInfo.Quality != task.Quality {
+		task.Quality = videoInfo.Quality
 	}
 	m.mu.Unlock()
 
@@ -634,18 +612,20 @@ func (m *Manager) parseVideo(url, quality string) (*videoInfo, error) {
 		if err != nil {
 			return nil, err
 		}
+		// 用API返回的实际清晰度（definition值），不用优先级循环的选中结果
 		actualQuality := info.SelectedQuality
 		if actualQuality == "" {
 			actualQuality = "1080p"
 		}
 		return &videoInfo{
-			Title:    info.Title,
-			Author:   info.Author,
-			CoverURL: info.CoverURL,
-			VideoURL: info.VideoURL,
-			AudioURL: info.AudioURL,
-			Platform: "douyin",
-			Quality:  actualQuality,
+			Title:      info.Title,
+			Author:     info.Author,
+			CoverURL:   info.CoverURL,
+			VideoURL:   info.VideoURL,
+			AudioURL:   info.AudioURL,
+			DouyinURLs: info.VideoURLs,
+			Platform:   "douyin",
+			Quality:    actualQuality,
 		}, nil
 
 	case "youtube":
@@ -686,8 +666,9 @@ type videoInfo struct {
 	CoverURL  string
 	VideoURL  string
 	AudioURL  string
-	VideoURLs []string // 候选视频URL(含backup, B站CDN 403时自动切换)
-	AudioURLs []string // 候选音频URL
+	VideoURLs []string            // B站: 候选视频URL列表(含backup, 403自动切换)
+	AudioURLs []string            // B站: 候选音频URL列表
+	DouyinURLs map[string]string  // 抖音: definition→url 完整表(用于码率优选)
 	Platform  string
 	Quality   string
 }
@@ -712,6 +693,14 @@ func (m *Manager) downloadVideo(info *videoInfo, outputPath string, progressFunc
 				if kv := strings.SplitN(part, "=", 2); len(kv) == 2 {
 					cookies[strings.TrimSpace(kv[0])] = strings.TrimSpace(kv[1])
 				}
+			}
+		}
+		// 有URL表时：选码率最高的流下载，用那条流的definition作为实际清晰度
+		if len(info.DouyinURLs) > 0 {
+			bestURL, bestQuality := m.pickBestDouyinStream(info.DouyinURLs)
+			if bestURL != "" {
+				info.VideoURL = bestURL
+				info.Quality = bestQuality
 			}
 		}
 		if info.AudioURL != "" {
@@ -916,4 +905,23 @@ func generateID() string {
 	b[6] = (b[6] & 0x0f) | 0x40
 	b[8] = (b[8] & 0x3f) | 0x80
 	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+}
+
+// pickBestDouyinStream 从抖音URL表里选最佳流
+// URL表格式: {"4k": url1, "1080p": url2, "720p": url3, ...}
+// key就是API返回的definition字段值（真实清晰度标识）
+// 选最高definition等级的流，同等级已经按码率优选过了
+func (m *Manager) pickBestDouyinStream(videoURLs map[string]string) (string, string) {
+	priority := []string{"4k", "2k", "1080p", "720p", "540p", "480p", "360p"}
+	for _, q := range priority {
+		if u, ok := videoURLs[q]; ok && u != "" {
+			return u, q
+		}
+	}
+	for q, u := range videoURLs {
+		if q != "_audio" && q != "download" && u != "" {
+			return u, q
+		}
+	}
+	return "", ""
 }
