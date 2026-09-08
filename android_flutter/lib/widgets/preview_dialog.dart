@@ -19,6 +19,7 @@ class _PreviewDialogState extends State<PreviewDialog> {
   Map<String, dynamic>? _collectionPreview;
   bool _isCollection = false;
   final Set<int> _selectedIndices = {};
+  String _selectedQuality = ''; // 用户选中的清晰度
 
   @override
   void initState() {
@@ -136,6 +137,14 @@ class _PreviewDialogState extends State<PreviewDialog> {
           if (quality.isNotEmpty) ...[const SizedBox(width: 8), _tag(quality, const Color(0xFFC4B5FD))],
         ]),
         const SizedBox(height: 10),
+        // 清晰度选择
+        if (platform == 'bilibili' || platform == 'douyin' || platform == 'youtube') ...[
+          Wrap(spacing: 8, runSpacing: 6, children: [
+            for (final q in ['4k', '2k', '1080p', '720p', '480p'])
+              _qualityChip(q, t),
+          ]),
+          const SizedBox(height: 12),
+        ],
         // 标题
         Text(title, style: TextStyle(color: t.textPrimary, fontSize: 16, fontWeight: FontWeight.w600, height: 1.4)),
         if (author.isNotEmpty) ...[
@@ -146,7 +155,9 @@ class _PreviewDialogState extends State<PreviewDialog> {
         // 下载按钮
         SizedBox(width: double.infinity, height: 48,
           child: _gradientBtn('添加到下载', Icons.download_rounded, t.primary, () {
-            Navigator.pop(context, {'action': 'download', 'preview': _videoPreview});
+            final data = Map<String, dynamic>.from(_videoPreview!);
+            if (_selectedQuality.isNotEmpty) data['quality'] = _selectedQuality;
+            Navigator.pop(context, {'action': 'download', 'preview': data});
           })),
       ]),
     );
@@ -290,6 +301,26 @@ class _PreviewDialogState extends State<PreviewDialog> {
         border: Border.all(color: color.withOpacity(0.25), width: 0.5),
       ),
       child: Text(text, style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w600)),
+    );
+  }
+
+  static const _qualities = ['4k', '2k', '1080p', '720p', '480p'];
+
+  Widget _qualityChip(String q, ThemeProvider t) {
+    final selected = _selectedQuality == q ||
+        (_selectedQuality.isEmpty && q == (_videoPreview?['quality'] ?? '').toString().toLowerCase());
+    return GestureDetector(
+      onTap: () => setState(() => _selectedQuality = q),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+        decoration: BoxDecoration(
+          color: selected ? t.primary.withOpacity(0.2) : t.glass,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: selected ? t.primary : t.border, width: selected ? 1.5 : 0.5),
+        ),
+        child: Text(q.toUpperCase(),
+          style: TextStyle(color: selected ? t.primary : t.textSecondary, fontSize: 11, fontWeight: FontWeight.w700)),
+      ),
     );
   }
 

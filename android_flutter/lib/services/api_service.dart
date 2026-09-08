@@ -212,12 +212,14 @@ class ApiService {
   static Future<Map<String, dynamic>?> createFromPreview(Map<String, dynamic> preview, {String quality = '4k'}) async {
     try {
       final url = preview['url'] ?? preview['video_url'] ?? '';
+      // preview里的quality来自用户在弹窗里选的清晰度，优先使用
+      final selectedQuality = (preview['quality'] ?? quality).toString();
       final resp = await http.post(
         Uri.parse('$baseUrl/api/tasks/create-from-preview'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'url': url,
-          'quality': quality,
+          'quality': selectedQuality,
           'preview_data': preview,
           'source': 'app',
         }),

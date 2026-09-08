@@ -801,7 +801,7 @@ func (h *Handlers) CreateTask(c *gin.Context) {
 				break
 			}
 			if attempt < 5 {
-				log.Printf("[预览重试] 解析失败(第%d次): %v，3秒后重试...", attempt, err)
+				h.addLog("WARN", "", fmt.Sprintf("预览解析重试(%d/5): %v", attempt, err))
 				time.Sleep(3 * time.Second)
 			}
 		}

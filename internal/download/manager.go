@@ -274,7 +274,7 @@ func (m *Manager) ExecuteTask(ctx context.Context, taskID string) {
 			break
 		}
 		if attempt < 5 {
-			log.Printf("[重试] 解析失败(第%d次): %v，3秒后重试...", attempt, err)
+			m.emit("WARN", taskID, "解析重试(%d/5): %v", attempt, err)
 			time.Sleep(3 * time.Second)
 		}
 	}
@@ -337,7 +337,7 @@ func (m *Manager) ExecuteTask(ctx context.Context, taskID string) {
 		os.Remove(outputPath + ".video.tmp")
 		os.Remove(outputPath + ".audio.tmp")
 		if attempt < 5 {
-			log.Printf("[重试] 下载失败(第%d次): %v，3秒后重试...", attempt, err)
+			m.emit("WARN", taskID, "下载重试(%d/5): %v", attempt, err)
 			time.Sleep(3 * time.Second)
 		}
 	}

@@ -131,9 +131,8 @@ func main() {
 	go func() {
 		for {
 			if out, newVer, err := youtube.SelfUpdate(); err != nil {
-				log.Printf("[WARN] yt-dlp自动更新跳过: %v", err)
+				h.addLog("WARN", "", "yt-dlp自动更新跳过: "+err.Error())
 			} else if strings.Contains(out, "Updated") || strings.Contains(out, "updating to") {
-				log.Printf("[INFO] yt-dlp已自动更新: %s", newVer)
 				h.addLog("INFO", "", "YouTube解析引擎已自动更新: "+newVer)
 			}
 			time.Sleep(24 * time.Hour)
