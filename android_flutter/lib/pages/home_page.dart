@@ -120,7 +120,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   void _armStandingTimer() {
     _timer?.cancel();
     if (!_foreground || !mounted) return;
-    final hasActive = _tasks.any((t) => t['status'] == 'downloading' || t['status'] == 'parsing');
+    // 有任务在解析/下载，或APP正在本地下载到相册 → 2秒实时
+    final hasActive = _dlProgress.isNotEmpty ||
+        _tasks.any((t) => t['status'] == 'downloading' || t['status'] == 'parsing');
     final interval = hasActive ? const Duration(seconds: 2) : _standingInterval;
     _timer = Timer(interval, () {
       _refresh(force: hasActive);
