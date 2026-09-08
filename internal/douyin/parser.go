@@ -383,6 +383,7 @@ func (p *Parser) extractVideoURLs(videoData map[string]interface{}) map[string]s
 		width, _ := brMap["width"].(float64)
 		height, _ := brMap["height"].(float64)
 		bitRateVal, _ := brMap["bit_rate"].(float64)
+		videoExtra, _ := brMap["video_extra"].(string)
 
 		brPlayAddr, _ := brMap["play_addr"].(map[string]interface{})
 		if brPlayAddr == nil {
@@ -394,7 +395,12 @@ func (p *Parser) extractVideoURLs(videoData map[string]interface{}) map[string]s
 			u, _ := brURLList[0].(string)
 			u = processVideoURL(u)
 
-			q := mapQualityAdvanced(gearName, qualityType, int(width), int(height))
+			// 优先用video_extra里的definition字段(最准确的清晰度标识)
+			// 兜底用width/height判断
+			q := extractQualityFromExtra(videoExtra)
+			if q == "" {
+				q = mapQualityAdvanced(gearName, qualityType, int(width), int(height))
+			}
 			if q != "" {
 				entries = append(entries, brEntry{quality: q, url: u, bitrate: bitRateVal})
 			}
@@ -460,6 +466,7 @@ func (p *Parser) extractVideoURLs(videoData map[string]interface{}) map[string]s
 		}
 	}
 
+	// h265/bytevc1备用流：如果没有4k标签的流，用这些作为4k候选
 	for _, key := range []string{"play_addr_h265", "play_addr_h264", "play_addr_bytevc1"} {
 		if v, ok := videoData[key].(map[string]interface{}); ok {
 			if urlList, ok := v["url_list"].([]interface{}); ok && len(urlList) > 0 {
@@ -467,7 +474,7 @@ func (p *Parser) extractVideoURLs(videoData map[string]interface{}) map[string]s
 				u = processVideoURL(u)
 				if u != "" {
 					if _, exists := urls["4k"]; !exists {
-						urls["4k_h265"] = u
+						urls["4k"] = u
 					}
 				}
 			}
@@ -888,4 +895,38 @@ func getKeys(m map[string]string) []string {
 		keys = append(keys, k)
 	}
 	return keys
+}
+
+// extractQualityFromExtra 从video_extra JSON提取definition字段作为清晰度标识
+// 方案文档明确: definition是最准确的清晰度来源(如"4k","1080p","720p","540p")
+// 用Contains匹配: "4k_hdr" → "4k", "1080p_h265" → "1080p"
+func extractQualityFromExtra(extra string) string {
+	if extra == "" {
+		return ""
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal([]byte(extra), &m); err != nil {
+		return ""
+	}
+	def, _ := m["definition"].(string)
+	if def == "" {
+		return ""
+	}
+	def = strings.ToLower(def)
+	switch {
+	case strings.Contains(def, "4k"):
+		return "4k"
+	case strings.Contains(def, "2k") || strings.Contains(def, "1440"):
+		return "2k"
+	case strings.Contains(def, "1080"):
+		return "1080p"
+	case strings.Contains(def, "720"):
+		return "720p"
+	case strings.Contains(def, "540") || strings.Contains(def, "480"):
+		return "480p"
+	case strings.Contains(def, "360"):
+		return "360p"
+	default:
+		return def
+	}
 }
