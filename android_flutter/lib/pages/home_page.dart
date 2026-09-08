@@ -114,18 +114,17 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   /// 调度下一次刷新：
-  /// - 有任务在解析/下载 → 2秒实时跟踪进度（绕过CD）
-  /// - 否则 → 5分钟兜底轮询
-  /// 仅前台运行
+  /// - 有任务在解析/下载/待处理，或本地下载中 → 2秒实时
+  /// - 否则 → 5分钟兜底
+  /// 每次timer触发都强制拉数据(force:true)，用interval控制频率
   void _armStandingTimer() {
     _timer?.cancel();
     if (!_foreground || !mounted) return;
-    // 有任务在解析/下载，或APP正在本地下载到相册 → 2秒实时
     final hasActive = _dlProgress.isNotEmpty ||
-        _tasks.any((t) => t['status'] == 'downloading' || t['status'] == 'parsing');
+        _tasks.any((t) => t['status'] != 'completed' && t['status'] != 'failed');
     final interval = hasActive ? const Duration(seconds: 2) : _standingInterval;
-    _timer = Timer(interval, () {
-      _refresh(force: hasActive);
+    _timer = Timer(interval, () async {
+      await _refresh(force: true); // timer永远force，interval已经是频率控制
     });
   }
 
