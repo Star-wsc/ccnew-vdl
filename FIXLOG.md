@@ -205,3 +205,17 @@
 - **修复**：通过`PackageManager`运行时读取真实版本号
 - **版本**：v1.5.0
 - **文件**：`settings_page.dart`
+
+---
+
+## 2026-09-08
+
+### 抖音下载最高只有720P（APP UA方案）
+- **症状**：即使提供Cookie，抖音下载最高只有720P，无法拿到4K/1080P
+- **根因**：`parseDetailAPI`用桌面浏览器UA请求，抖音服务端识别到浏览器直接返回403或空数据；偶尔返回数据时也只给720P以下清晰度
+- **修复**：`parseDetailAPI`改用APP UA（`com.ss.android.ugc.aweme/280000`）请求Detail API，解锁完整bit_rate数据（4K/2K/1080P）；失败时自动降级到桌面UA重试；`extractVideoURLs`同清晰度多条bit_rate取码率最高的（normal_* > adapt_lowest_*）；下载请求UA也改为APP UA
+- **注意**：APP UA只用于Detail API请求，网页解析（策略1/2/3）仍用浏览器UA——APP UA请求网页会返回不同页面结构，解析不到renderData
+- **注意**：竖屏短视频本身不提供4K流（最高480P），APP UA对长视频才有效
+- **版本**：v1.4.19
+- **文件**：`internal/douyin/parser.go`、`internal/douyin/downloader.go`
+- **方案文档**：`_douyin_quality_research/抖音高清晰度下载方案.md`
