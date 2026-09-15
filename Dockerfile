@@ -18,10 +18,10 @@ COPY . .
 ARG VERSION=v1.3.5
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags "-X main.Version=${VERSION}" -o server ./cmd/server/
 
-# 运行阶段
-FROM alpine:latest
+# 运行阶段（必须用glibc基础镜像，yt-dlp二进制是glibc编译的）
+FROM debian:bookworm-slim
 
-RUN apk add --no-cache ca-certificates ffmpeg
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates ffmpeg && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
