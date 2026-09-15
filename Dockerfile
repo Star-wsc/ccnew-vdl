@@ -31,10 +31,12 @@ COPY --from=builder /app/server .
 # 复制静态文件
 COPY --from=builder /app/static ./static
 
-# YouTube引擎: yt-dlp(按目标架构软链)
+# YouTube engine: yt-dlp (select by TARGETARCH)
 ARG TARGETARCH
-COPY --from=builder /app/yt-dlp ./yt-dlp
-RUN if [ "$TARGETARCH" = "arm64" ]; then ln -s yt-dlp-linux-arm64 ./yt-dlp/yt-dlp; else ln -s yt-dlp-linux-amd64 ./yt-dlp/yt-dlp; fi && chmod +x ./yt-dlp/yt-dlp-linux-*
+COPY --from=builder /app/yt-dlp/yt-dlp-linux-amd64 /app/yt-dlp/yt-dlp-linux-amd64
+COPY --from=builder /app/yt-dlp/yt-dlp-linux-arm64 /app/yt-dlp/yt-dlp-linux-arm64
+RUN mkdir -p /app/yt-dlp && chmod +x /app/yt-dlp/yt-dlp-linux-* && \
+    if [ "$TARGETARCH" = "arm64" ]; then cp /app/yt-dlp/yt-dlp-linux-arm64 /app/yt-dlp/yt-dlp; else cp /app/yt-dlp/yt-dlp-linux-amd64 /app/yt-dlp/yt-dlp; fi
 
 # 创建下载目录
 RUN mkdir -p /downloads /logs
