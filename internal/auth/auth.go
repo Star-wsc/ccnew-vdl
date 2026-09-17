@@ -122,6 +122,43 @@ func (s *Store) Setup(username, password string) error {
 	return nil
 }
 
+// ChangePassword 验证旧密码后修改用户名/密码，并吊销全部会话。
+func (s *Store) ChangePassword(oldPassword, newPassword, newUsername string) error {
+	if len(newPassword) < minPasswordLen {
+		return ErrWeakPassword
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.username == "" || len(s.hash) == 0 {
+		return ErrNotConfigured
+	}
+	if err := bcrypt.CompareHashAndPassword(s.hash, []byte(oldPassword)); err != nil {
+		return ErrBadCredentials
+	}
+	username := s.username
+	if nu := strings.TrimSpace(newUsername); nu != "" {
+		username = nu
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	rec := fileRecord{
+		Username: username,
+		Algo:     "bcrypt",
+		Hash:     hex.EncodeToString(hash),
+		Updated:  time.Now().Format(time.RFC3339),
+	}
+	if err := s.persist(rec); err != nil {
+		return err
+	}
+	s.username = username
+	s.hash = hash
+	// 改密后强制所有端重新登录
+	s.sessions = map[string]time.Time{}
+	return nil
+}
+
 func (s *Store) persist(rec fileRecord) error {
 	data, err := json.MarshalIndent(rec, "", "  ")
 	if err != nil {

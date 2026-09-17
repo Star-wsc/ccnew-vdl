@@ -340,7 +340,15 @@ input[type=text]:focus,textarea:focus{border-color:rgba(0,255,163,.55);box-shado
     <div class="glass sgrp">
       <h3>[ 账号 ]</h3><div class="d">服务器开启鉴权时生效；桌面版本地模式通常无需登录</div>
       <div class="sr"><label>登录状态</label><span class="masked" id="authMode">-</span><span class="masked" id="authUser2" style="color:var(--acc)"></span></div>
-      <div class="sr"><label></label><button class="btn sm danger" onclick="doLogout()">退出登录</button><span style="color:var(--faint);font-size:12px">退出后需重新输入用户名密码</span></div>
+      <div class="sr"><label>新用户名</label><input type="text" id="chUser" placeholder="留空则不修改"></div>
+      <div class="sr"><label>旧密码</label><input type="password" id="chOld" autocomplete="current-password"></div>
+      <div class="sr"><label>新密码</label><input type="password" id="chNew" autocomplete="new-password" placeholder="至少 8 位"></div>
+      <div class="sr"><label>确认新密码</label><input type="password" id="chNew2" autocomplete="new-password"></div>
+      <div class="sr"><label></label>
+        <button class="btn sm primary" onclick="changePassword()">修改密码</button>
+        <button class="btn sm danger" onclick="doLogout()">退出登录</button>
+        <span style="color:var(--faint);font-size:12px">改密后所有端需重新登录</span>
+      </div>
     </div>
     <div class="glass sgrp">
       <h3>[ 系统 ]</h3>
@@ -405,6 +413,23 @@ async function loadAuthUI(){
 async function doLogout(){
   try{await fetch("/api/auth/logout",{method:"POST",headers:authHdrs(),credentials:"same-origin"})}catch(e){}
   goLogin();
+}
+async function changePassword(){
+  const oldP=$("#chOld")?.value||"";
+  const newP=$("#chNew")?.value||"";
+  const new2=$("#chNew2")?.value||"";
+  const newUser=($("#chUser")?.value||"").trim();
+  if(!oldP||!newP){toast("请填写旧密码和新密码","err");return}
+  if(newP.length<8){toast("新密码至少 8 位","err");return}
+  if(newP!==new2){toast("两次新密码不一致","err");return}
+  try{
+    const r=await api("/api/auth/change-password",{method:"POST",body:JSON.stringify({
+      old_password:oldP,new_password:newP,new_username:newUser||""
+    })});
+    toast(r.message||"密码已修改，请重新登录");
+    try{localStorage.removeItem("doubi_token")}catch(e){}
+    setTimeout(()=>location.replace("/"),1200);
+  }catch(e){toast(e.message||"修改失败","err")}
 }
 const _lb=$("#logoutBtn");if(_lb)_lb.addEventListener("click",doLogout);
 

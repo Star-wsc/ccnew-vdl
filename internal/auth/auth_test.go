@@ -64,6 +64,39 @@ func TestReload(t *testing.T) {
 	}
 }
 
+func TestChangePassword(t *testing.T) {
+	dir := t.TempDir()
+	st, err := NewStore(filepath.Join(dir, "auth.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Setup("admin", "password123"); err != nil {
+		t.Fatal(err)
+	}
+	tok, _ := st.Login("admin", "password123")
+	if !st.Validate(tok) {
+		t.Fatal("pre-change token")
+	}
+	if err := st.ChangePassword("wrong-old", "password456", ""); err != ErrBadCredentials {
+		t.Fatalf("wrong old: %v", err)
+	}
+	if err := st.ChangePassword("password123", "short", ""); err != ErrWeakPassword {
+		t.Fatalf("weak new: %v", err)
+	}
+	if err := st.ChangePassword("password123", "password456", "root"); err != nil {
+		t.Fatal(err)
+	}
+	if st.Validate(tok) {
+		t.Fatal("old session should be revoked")
+	}
+	if _, err := st.Login("admin", "password123"); err != ErrBadCredentials {
+		t.Fatal("old password should fail")
+	}
+	if _, err := st.Login("root", "password456"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestResolveMode(t *testing.T) {
 	if ResolveMode("off", false) != "off" {
 		t.Fatal("explicit off")

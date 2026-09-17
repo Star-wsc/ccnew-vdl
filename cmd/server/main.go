@@ -172,6 +172,7 @@ func main() {
 	r.POST("/api/auth/setup", gate.handleSetup)
 	r.POST("/api/auth/login", gate.handleLogin)
 	r.POST("/api/auth/logout", gate.handleLogout)
+	r.POST("/api/auth/change-password", gate.handleChangePassword)
 
 	// 所有 API 路由
 	r.GET("/", func(c *gin.Context) {

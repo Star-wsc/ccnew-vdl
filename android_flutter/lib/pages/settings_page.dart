@@ -177,6 +177,58 @@ class _SettingsPageState extends State<SettingsPage> {
         ),
         body: Stack(children: [
           ListView(padding: const EdgeInsets.all(16), children: [
+            // 账号（置顶）：展示当前登录态 + 退出，不在设置内重复登录表单
+            if (_auth.isNotEmpty || ApiService.authToken != null) ...[
+              _section(tp, Icons.account_circle_rounded, '账号'),
+              _card(tp, Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                if (_auth['auth_mode'] == 'off')
+                  Text('当前服务器未开启登录（如 Windows 桌面版）',
+                      style: TextStyle(color: tp.textDim, fontSize: 12))
+                else if (_auth['need_setup'] == true)
+                  Text('请先用浏览器打开服务器地址完成初始化，再在启动页登录',
+                      style: TextStyle(color: tp.error, fontSize: 12))
+                else ...[
+                  Row(children: [
+                    Icon(
+                      (ApiService.authToken != null && ApiService.authToken!.isNotEmpty)
+                          ? Icons.verified_user_rounded
+                          : Icons.lock_outline_rounded,
+                      color: (ApiService.authToken != null && ApiService.authToken!.isNotEmpty)
+                          ? const Color(0xFF00D09C)
+                          : tp.error,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(
+                        (ApiService.authToken != null && ApiService.authToken!.isNotEmpty)
+                            ? '已登录'
+                            : '未登录',
+                        style: TextStyle(color: tp.textPrimary, fontWeight: FontWeight.w600, fontSize: 14),
+                      ),
+                      Text(
+                        ApiService.authUsername.isNotEmpty
+                            ? ApiService.authUsername
+                            : ((_auth['username'] ?? '') as String),
+                        style: TextStyle(color: tp.textDim, fontSize: 12),
+                      ),
+                    ])),
+                    if (ApiService.authToken != null && ApiService.authToken!.isNotEmpty)
+                      TextButton(
+                        onPressed: _logout,
+                        child: Text('退出登录', style: TextStyle(color: tp.error, fontSize: 13)),
+                      ),
+                  ]),
+                  if (!(ApiService.authToken != null && ApiService.authToken!.isNotEmpty))
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text('请重启 APP，在启动登录页使用账号密码登录',
+                          style: TextStyle(color: tp.textDim, fontSize: 12)),
+                    ),
+                ],
+              ])),
+              const SizedBox(height: 16),
+            ],
             // 版本 + 服务器状态
             _card(tp, Row(children: [
               Container(width: 44, height: 44,
@@ -202,35 +254,6 @@ class _SettingsPageState extends State<SettingsPage> {
               _input(tp, _serverCtrl, '服务器地址', 'http://192.168.x.x:18000', Icons.language_rounded),
               const SizedBox(height: 12),
               SizedBox(width: double.infinity, child: _btn(tp, '测试连接', Icons.wifi_find_rounded, onPressed: _testing ? null : _testConnection, loading: _testing)),
-            ])),
-            const SizedBox(height: 16),
-            // 登录（服务器开启鉴权时）
-            _section(tp, Icons.lock_rounded, '账号登录'),
-            _card(tp, Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              if (_auth['auth_mode'] == 'off')
-                Text('当前服务器未开启登录（如 Windows 桌面版），无需账号。',
-                    style: TextStyle(color: tp.textDim, fontSize: 12))
-              else if (_auth['need_setup'] == true)
-                Text('请先用浏览器打开服务器地址完成初始化设置密码，再回到 APP 登录。',
-                    style: TextStyle(color: tp.error, fontSize: 12))
-              else ...[
-                if (ApiService.authToken != null && ApiService.authToken!.isNotEmpty)
-                  Row(children: [
-                    Icon(Icons.verified_user_rounded, color: const Color(0xFF00D09C), size: 18),
-                    const SizedBox(width: 8),
-                    Expanded(child: Text('已登录：${ApiService.authUsername}',
-                        style: TextStyle(color: tp.textPrimary, fontSize: 13))),
-                    TextButton(onPressed: _logout, child: Text('退出', style: TextStyle(color: tp.error))),
-                  ])
-                else ...[
-                  _input(tp, _userCtrl, '用户名', 'admin', Icons.person_rounded),
-                  const SizedBox(height: 12),
-                  _input(tp, _passCtrl, '密码', '••••••••', Icons.lock_rounded, obscure: true),
-                  const SizedBox(height: 12),
-                  SizedBox(width: double.infinity, child: _btn(tp, '登录', Icons.login_rounded,
-                      onPressed: _loggingIn || !_serverOnline ? null : _login, loading: _loggingIn)),
-                ],
-              ],
             ])),
             const SizedBox(height: 16),
             // YouTube 代理（服务器端设置）

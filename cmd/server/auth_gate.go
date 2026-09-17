@@ -144,7 +144,7 @@ func (g *authGate) middleware() gin.HandlerFunc {
 
 func isPublicAuthPath(path string) bool {
 	switch path {
-	case "/api/auth/status", "/api/auth/setup", "/api/auth/login", "/api/auth/logout":
+	case "/api/auth/status", "/api/auth/setup", "/api/auth/login", "/api/auth/logout", "/api/auth/change-password":
 		return true
 	}
 	return false
@@ -238,6 +238,53 @@ func (g *authGate) handleLogout(c *gin.Context) {
 	g.store.Logout(tok)
 	g.clearSessionCookie(c)
 	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+type authChangeReq struct {
+	OldPassword string `json:"old_password"`
+	NewPassword string `json:"new_password"`
+	NewUsername string `json:"new_username"`
+}
+
+func (g *authGate) handleChangePassword(c *gin.Context) {
+	if !g.enabled() {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "auth disabled"})
+		return
+	}
+	if !g.store.Configured() {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "need_setup", "need_setup": true})
+		return
+	}
+	if !g.store.Validate(g.tokenFromRequest(c)) {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	var req authChangeReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效请求"})
+		return
+	}
+	if req.OldPassword == "" || req.NewPassword == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请填写旧密码和新密码"})
+		return
+	}
+	if err := g.store.ChangePassword(req.OldPassword, req.NewPassword, req.NewUsername); err != nil {
+		status := http.StatusBadRequest
+		if err == auth.ErrBadCredentials {
+			status = http.StatusUnauthorized
+		}
+		if err == auth.ErrWeakPassword {
+			status = http.StatusBadRequest
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+	g.clearSessionCookie(c)
+	c.JSON(http.StatusOK, gin.H{
+		"ok":       true,
+		"username": g.store.Username(),
+		"message":  "密码已修改，请用新密码重新登录",
+	})
 }
 
 func (g *authGate) setSessionCookie(c *gin.Context, token string) {
