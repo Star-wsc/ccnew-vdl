@@ -120,6 +120,23 @@ Android APP      ─┘         │
 > 禁止将 `http://公网IP:18000` 明文暴露在公网——密码与 Cookie 可被窃听。  
 > 建议：反代域名 → 后端 `http://内网IP:18000`，应用保持 HTTP，TLS 在反代终结。
 
+### Hermes / 龙虾等机器客户端接入
+
+Web「系统配置 → 第三方接入」生成 **接入密钥**（`dbl_…`），粘贴到 Hermes 后：
+
+```http
+POST /api/tasks
+X-Api-Key: dbl_xxxxxxxx
+Content-Type: application/json
+
+{"url":"https://v.douyin.com/xxx/","quality":"4k","source":"hermes"}
+```
+
+- 也可用 `Authorization: ApiKey dbl_…`
+- 人用网页/APP 登录，机器用设备密钥，互不干扰
+- 密钥仅生成时显示一次；可吊销；改管理员密码**不影响**已签发设备密钥
+- 服务端只存哈希（`devices.json`，0600）
+
 ### 反代 / Hermes / Lucky 部署说明
 
 | 场景 | 预期行为 | 注意 |

@@ -351,6 +351,15 @@ input[type=text]:focus,textarea:focus{border-color:rgba(0,255,163,.55);box-shado
       </div>
     </div>
     <div class="glass sgrp">
+      <h3>[ 第三方接入 · Hermes / 龙虾 ]</h3><div class="d">生成接入密钥后粘贴到机器客户端；密钥仅显示一次，可随时吊销</div>
+      <div class="sr"><label>设备名称</label><input type="text" id="devName" placeholder="例如 Hermes" style="max-width:220px"></div>
+      <div class="sr"><label></label>
+        <button class="btn sm primary" onclick="createDeviceKey()">生成接入密钥</button>
+        <span id="devNewKey" style="font-family:var(--mono);font-size:12px;color:var(--acc);word-break:break-all"></span>
+      </div>
+      <div class="sr" style="align-items:flex-start"><label>已授权</label><div id="devList" style="flex:1;font-size:12px;color:var(--dim)">加载中…</div></div>
+    </div>
+    <div class="glass sgrp">
       <h3>[ 系统 ]</h3>
       <div class="sr"><label>程序版本</label><span class="masked" id="sVer">-</span></div>
       <div class="sr"><label>控制台窗口</label><button class="btn sm" id="conB" onclick="toggleCon()">显示</button><span style="color:var(--faint);font-size:12px">切换后台控制台可见性</span></div>
@@ -430,6 +439,44 @@ async function changePassword(){
     try{localStorage.removeItem("doubi_token")}catch(e){}
     setTimeout(()=>location.replace("/"),1200);
   }catch(e){toast(e.message||"修改失败","err")}
+}
+async function loadDevices(){
+  const el=$("#devList");if(!el)return;
+  try{
+    const r=await api("/api/auth/devices");
+    const list=r.devices||[];
+    if(!list.length){el.innerHTML='<span style="color:var(--faint)">暂无设备密钥</span>';return}
+    el.innerHTML=list.map(d=>{
+      const st=d.revoked?'<span style="color:var(--err)">已吊销</span>':'<span style="color:var(--acc)">有效</span>';
+      return '<div style="margin:4px 0;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+
+        '<b style="color:var(--txt)">'+esc(d.name)+'</b>'+
+        '<span style="font-family:var(--mono);color:var(--faint)">'+esc(d.prefix||d.id)+'</span>'+
+        st+
+        (d.last_used_at?'<span style="color:var(--faint)">最近 '+esc(d.last_used_at)+'</span>':'')+
+        (d.revoked?'':' <button class="btn sm danger" style="padding:2px 8px;font-size:11px" onclick="revokeDevice(\''+esc(d.id)+'\')">吊销</button>')+
+        '</div>';
+    }).join("");
+  }catch(e){el.textContent=e.message||"加载失败"}
+}
+async function createDeviceKey(){
+  const name=($("#devName")?.value||"Hermes").trim()||"Hermes";
+  try{
+    const r=await api("/api/auth/devices",{method:"POST",body:JSON.stringify({name:name})});
+    const el=$("#devNewKey");
+    if(el&&r.key){
+      el.innerHTML='密钥（仅此一次）：<b>'+esc(r.key)+'</b>'+
+        ' <button class="btn sm" style="padding:2px 8px;font-size:11px" onclick="navigator.clipboard.writeText(\''+esc(r.key)+'\');toast(\'已复制\')">复制</button>';
+    }
+    toast(r.hint||"密钥已生成，请复制到客户端");
+    loadDevices();
+  }catch(e){toast(e.message||"生成失败","err")}
+}
+async function revokeDevice(id){
+  try{
+    await api("/api/auth/devices/"+encodeURIComponent(id),{method:"DELETE"});
+    toast("已吊销");
+    loadDevices();
+  }catch(e){toast(e.message||"吊销失败","err")}
 }
 const _lb=$("#logoutBtn");if(_lb)_lb.addEventListener("click",doLogout);
 
@@ -706,7 +753,7 @@ function closeM(){PLAYING=false;const v=$("#pv");if(v){v.pause();v.removeAttribu
 function cfm(t,b,ok){showModal("<h3>"+t+"</h3>","<div style='font-size:13.5px'>"+b+"</div>",'<button class="btn" onclick="closeM()">取消</button><button class="btn danger" id="okB">确认执行</button>');$("#okB").addEventListener("click",async()=>{try{await ok()}catch(e){}closeM()})}
 
 /* ===== 初始化 ===== */
-loadAuthUI();initSet();syncCon();poll();
+loadAuthUI();initSet();syncCon();poll();loadDevices();
 setInterval(poll,2500);setInterval(refreshLogs,3000);setInterval(refreshCols,9000);
 $("#taskList").addEventListener("change",function(e){if(e.target.dataset.sid){togSel(e.target.dataset.sid)}});
 </script>

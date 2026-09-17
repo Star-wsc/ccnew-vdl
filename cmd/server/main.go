@@ -173,6 +173,9 @@ func main() {
 	r.POST("/api/auth/login", gate.handleLogin)
 	r.POST("/api/auth/logout", gate.handleLogout)
 	r.POST("/api/auth/change-password", gate.handleChangePassword)
+	r.GET("/api/auth/devices", gate.handleListDevices)
+	r.POST("/api/auth/devices", gate.handleCreateDevice)
+	r.DELETE("/api/auth/devices/:id", gate.handleRevokeDevice)
 
 	// 所有 API 路由
 	r.GET("/", func(c *gin.Context) {

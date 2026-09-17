@@ -15,9 +15,10 @@ import (
 const sessionCookieName = "doubi_session"
 
 type authGate struct {
-	store *auth.Store
-	mode  string // "on" | "off"
-	mu    sync.Mutex
+	store   *auth.Store
+	devices *auth.DeviceStore
+	mode    string // "on" | "off"
+	mu      sync.Mutex
 	// 简单登录限速: key -> 失败时间列表
 	fails map[string][]time.Time
 }
@@ -27,14 +28,33 @@ func newAuthGate(cfgDir string, mode string) (*authGate, error) {
 	if err != nil {
 		return nil, err
 	}
+	devices, err := auth.NewDeviceStore(cfgDir)
+	if err != nil {
+		return nil, err
+	}
 	return &authGate{
-		store: store,
-		mode:  mode,
-		fails: map[string][]time.Time{},
+		store:   store,
+		devices: devices,
+		mode:    mode,
+		fails:   map[string][]time.Time{},
 	}, nil
 }
 
 func (g *authGate) enabled() bool { return g.mode == "on" }
+
+func (g *authGate) deviceKeyFromRequest(c *gin.Context) string {
+	if v := c.GetHeader("X-Api-Key"); v != "" {
+		return strings.TrimSpace(v)
+	}
+	if v := c.GetHeader("X-API-Key"); v != "" {
+		return strings.TrimSpace(v)
+	}
+	h := c.GetHeader("Authorization")
+	if strings.HasPrefix(h, "ApiKey ") {
+		return strings.TrimSpace(h[7:])
+	}
+	return ""
+}
 
 func (g *authGate) tokenFromRequest(c *gin.Context) string {
 	if v := c.GetHeader("Authorization"); v != "" {
@@ -59,7 +79,18 @@ func (g *authGate) allow(c *gin.Context) bool {
 	if !g.enabled() {
 		return true
 	}
-	return g.store.Validate(g.tokenFromRequest(c))
+	if g.store.Validate(g.tokenFromRequest(c)) {
+		return true
+	}
+	// 机器密钥（Hermes/龙虾等）
+	if dk := g.deviceKeyFromRequest(c); dk != "" && g.devices.ValidateKey(dk) {
+		return true
+	}
+	// 播放器 URL 上的设备密钥
+	if dk := c.Query("device_key"); dk != "" && g.devices.ValidateKey(dk) {
+		return true
+	}
+	return false
 }
 
 // clientKey 登录限速用的客户端标识。
@@ -130,7 +161,7 @@ func (g *authGate) middleware() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
-		if !g.store.Validate(g.tokenFromRequest(c)) {
+		if !g.allow(c) {
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"error":     "unauthorized",
 				"need_auth": true,
@@ -237,6 +268,71 @@ func (g *authGate) handleLogout(c *gin.Context) {
 	tok := g.tokenFromRequest(c)
 	g.store.Logout(tok)
 	g.clearSessionCookie(c)
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+// ===== 设备密钥（Hermes/龙虾等）=====
+
+type deviceCreateReq struct {
+	Name string `json:"name"`
+}
+
+func (g *authGate) requireLogin(c *gin.Context) bool {
+	if !g.enabled() {
+		return true
+	}
+	if !g.store.Configured() {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "need_setup", "need_setup": true})
+		return false
+	}
+	// 仅允许「人」的会话管理设备，不接受设备密钥再签发设备密钥
+	if !g.store.Validate(g.tokenFromRequest(c)) {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return false
+	}
+	return true
+}
+
+func (g *authGate) handleListDevices(c *gin.Context) {
+	if !g.requireLogin(c) {
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"devices": g.devices.ListDevices()})
+}
+
+func (g *authGate) handleCreateDevice(c *gin.Context) {
+	if !g.requireLogin(c) {
+		return
+	}
+	var req deviceCreateReq
+	_ = c.ShouldBindJSON(&req)
+	id, key, err := g.devices.CreateDevice(req.Name)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"ok":   true,
+		"id":   id,
+		"key":  key,
+		"name": req.Name,
+		"hint": "请立即复制密钥并粘贴到 Hermes/龙虾，服务端只保存哈希，刷新后无法再次查看完整密钥",
+	})
+}
+
+func (g *authGate) handleRevokeDevice(c *gin.Context) {
+	if !g.requireLogin(c) {
+		return
+	}
+	id := c.Param("id")
+	if err := g.devices.RevokeDevice(id); err != nil {
+		status := http.StatusBadRequest
+		if err == auth.ErrDeviceNotFound {
+			status = http.StatusNotFound
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
