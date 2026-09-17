@@ -111,6 +111,11 @@ GET  /api/bilibili/cookie             查cookie状态(掩码；需登录)
    ```
 7. Ubuntu 上 `auth.json` 路径与 systemd 运行用户一致（一般是 `/home/<user>/.config/ccnew-vdl/auth.json`）；
    **不要**把 `auth.json` scp 进仓库目录或提交 git。
+8. **反代（Lucky / Hermes / Nginx 等）**：
+   - 首次初始化在**对外域名**完成；重启进程后会话丢失需重登
+   - 转发时保留 `X-Forwarded-For` / `X-Real-IP`（登录限速按真实 IP）
+   - 不要对 `/api/*` 做缓存；下载接口放宽超时
+   - 反代层不要再叠 Basic Auth，与应用账密二选一
 
 ### 移动端迭代
 1. 改代码 → `flutter analyze lib/` 检查
