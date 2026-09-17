@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/Star-wsc/ccnew-vdl/internal/safeurl"
 )
 
 type CollectionParser struct {
@@ -47,9 +49,9 @@ type CollectionVideoInfo struct {
 
 // ParseCollection 解析抖音合集URL，返回合集信息
 func (p *CollectionParser) ParseCollection(urlStr string) (*CollectionInfo, error) {
-	// 如果是短链接，先解析获取真实URL
+	// 如果是短链接，先解析获取真实URL — 仅官方域名
 	resolvedURL := urlStr
-	if strings.Contains(urlStr, "v.douyin.com") {
+	if safeurl.IsDouyinShortLink(urlStr) {
 		realURL, err := resolveShortURL(urlStr)
 		if err != nil {
 			return nil, fmt.Errorf("解析短链接失败: %v", err)

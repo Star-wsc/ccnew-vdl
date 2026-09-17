@@ -8,6 +8,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/Star-wsc/ccnew-vdl/internal/safeurl"
 )
 
 type Downloader struct {
@@ -39,10 +41,10 @@ func (d *Downloader) Download(url, outputPath string, progressFunc func(int64, i
 		return err
 	}
 
-	// 根据URL设置请求头
-	if strings.Contains(url, "bilibili.com") || strings.Contains(url, "hdslb.com") || strings.Contains(url, "bilivideo.com") {
+	// 仅对真实平台 CDN/API 域名挂对应 Cookie，防 URL 子串伪造外带凭据
+	if safeurl.IsBilibiliMediaURL(url) {
 		d.setBilibiliHeaders(req)
-	} else if strings.Contains(url, "douyin.com") || strings.Contains(url, "bytecdn.cn") || strings.Contains(url, "byteimg.com") {
+	} else if safeurl.IsDouyinMediaURL(url) {
 		d.setDouyinHeaders(req)
 	} else {
 		d.setHeaders(req)

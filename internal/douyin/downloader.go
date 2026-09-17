@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Star-wsc/ccnew-vdl/internal/models"
+	"github.com/Star-wsc/ccnew-vdl/internal/safeurl"
 )
 
 // DouyinDownloader 抖音下载器，包含多种解析策略
@@ -33,8 +34,8 @@ func (d *DouyinDownloader) SetCookies(cookies string) {
 func (d *DouyinDownloader) Parse(rawURL string) (*models.VideoInfo, error) {
 	videoURL := rawURL
 
-	// 解析短链接
-	if strings.Contains(videoURL, "v.douyin.com") {
+	// 解析短链接 — 仅 v.douyin.com 官方域名
+	if safeurl.IsDouyinShortLink(videoURL) {
 		resolved, err := d.parser.resolveShortURL(videoURL)
 		if err == nil && resolved != "" {
 			videoURL = resolved

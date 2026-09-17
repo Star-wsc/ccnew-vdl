@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/Star-wsc/ccnew-vdl/internal/safeurl"
 )
 
 type Parser struct {
@@ -43,8 +45,8 @@ type VideoInfo struct {
 }
 
 func (p *Parser) Parse(url string, quality string) (*VideoInfo, error) {
-	// 短链接(b23.tv)先跟随跳转拿到真实URL
-	if strings.Contains(url, "b23.tv") {
+	// 短链接(b23.tv)先跟随跳转拿到真实URL — 仅官方域名，防 SSRF
+	if safeurl.IsBilibiliShortLink(url) {
 		resolved, err := ResolveShortURL(url)
 		if err == nil && resolved != "" {
 			log.Printf("[B站] 短链接解析为: %s", resolved)

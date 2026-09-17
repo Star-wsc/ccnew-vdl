@@ -18,6 +18,7 @@ import (
 	"github.com/Star-wsc/ccnew-vdl/internal/bilibili"
 	"github.com/Star-wsc/ccnew-vdl/internal/config"
 	"github.com/Star-wsc/ccnew-vdl/internal/douyin"
+	"github.com/Star-wsc/ccnew-vdl/internal/safeurl"
 	"github.com/Star-wsc/ccnew-vdl/internal/youtube"
 )
 
@@ -182,6 +183,23 @@ func (m *Manager) ExecuteTask(ctx context.Context, taskID string) {
 		return
 	}
 
+	// preview 路径：客户端传来的流地址仅在域名白名单内才采用，否则强制走平台解析
+	if task.VideoURL != "" {
+		trusted := safeurl.IsTrustedDownloadURL(task.VideoURL)
+		if task.Platform == "youtube" {
+			trusted = trusted || safeurl.IsYouTubeWebURL(task.VideoURL)
+		}
+		if !trusted {
+			log.Printf("[安全] 丢弃不可信 preview video_url host，改走平台解析: task=%s", taskID)
+			task.VideoURL = ""
+			task.AudioURL = ""
+			m.mu.Lock()
+			task.VideoURL = ""
+			task.AudioURL = ""
+			m.mu.Unlock()
+		}
+	}
+
 	// 如果已有预览数据（来自 create-from-preview），跳过解析直接下载
 	if task.VideoURL != "" {
 		videoInfo := &videoInfo{
@@ -197,6 +215,10 @@ func (m *Manager) ExecuteTask(ctx context.Context, taskID string) {
 		// YouTube走yt-dlp引擎, 无需补音频; Quality由yt-dlp决定
 		if task.Platform != "youtube" {
 			if parsed, parseErr := m.parseVideo(task.URL, task.Quality); parseErr == nil && parsed != nil {
+				// 优先使用平台解析出的流地址，覆盖客户端传入值
+				if parsed.VideoURL != "" && safeurl.IsTrustedDownloadURL(parsed.VideoURL) {
+					videoInfo.VideoURL = parsed.VideoURL
+				}
 				if parsed.AudioURL != "" {
 					videoInfo.AudioURL = parsed.AudioURL
 				}
@@ -895,10 +917,10 @@ func sanitizeFilename(name string) string {
 }
 
 func identifyPlatform(url string) string {
-	if strings.Contains(url, "bilibili.com") || strings.Contains(url, "b23.tv") {
+	if safeurl.IsBilibiliWebURL(url) {
 		return "bilibili"
 	}
-	if strings.Contains(url, "douyin.com") || strings.Contains(url, "iesdouyin.com") || strings.Contains(url, "v.douyin.com") {
+	if safeurl.IsDouyinWebURL(url) {
 		return "douyin"
 	}
 	if youtube.IsYouTubeURL(url) {

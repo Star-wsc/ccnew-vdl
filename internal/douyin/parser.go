@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Star-wsc/ccnew-vdl/internal/models"
+	"github.com/Star-wsc/ccnew-vdl/internal/safeurl"
 )
 
 var douyinCookieWarningLogged bool
@@ -57,7 +58,7 @@ func (p *Parser) Parse(rawURL string) (*models.VideoInfo, error) {
 	videoURL := rawURL
 	log.Printf("[抖音] 开始解析: %s", rawURL)
 
-	if strings.Contains(videoURL, "v.douyin.com") {
+	if safeurl.IsDouyinShortLink(videoURL) {
 		resolved, err := p.resolveShortURL(videoURL)
 		if err == nil && resolved != "" {
 			videoURL = resolved

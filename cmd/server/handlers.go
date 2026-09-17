@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/Star-wsc/ccnew-vdl/internal/bilibili"
+	"github.com/Star-wsc/ccnew-vdl/internal/safeurl"
 	"github.com/Star-wsc/ccnew-vdl/internal/config"
 	"github.com/Star-wsc/ccnew-vdl/internal/douyin"
 	"github.com/Star-wsc/ccnew-vdl/internal/download"
@@ -247,13 +248,22 @@ func (h *Handlers) SetDownloadDir(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"detail": "路径不能为空"})
 		return
 	}
-	if err := os.MkdirAll(req.Path, 0755); err != nil {
+	clean := filepath.Clean(req.Path)
+	// 可选基路径限制：设置 DOWNLOAD_BASE_DIR 后，下载目录只能在该目录下
+	if base := strings.TrimSpace(os.Getenv("DOWNLOAD_BASE_DIR")); base != "" {
+		baseClean := filepath.Clean(base)
+		if clean != baseClean && !strings.HasPrefix(clean, baseClean+string(os.PathSeparator)) {
+			c.JSON(http.StatusForbidden, gin.H{"detail": "下载目录必须位于 DOWNLOAD_BASE_DIR 之下"})
+			return
+		}
+	}
+	if err := os.MkdirAll(clean, 0755); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"detail": "无法创建目录: " + err.Error()})
 		return
 	}
-	h.cfg.DownloadDir = req.Path
+	h.cfg.DownloadDir = clean
 	h.cfg.Save()
-	c.JSON(http.StatusOK, gin.H{"message": "下载目录已更新", "download_dir": req.Path})
+	c.JSON(http.StatusOK, gin.H{"message": "下载目录已更新", "download_dir": clean})
 }
 
 // ==================== Browse Folder ====================
@@ -585,7 +595,7 @@ func (h *Handlers) ProxyImage(c *gin.Context) {
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
 
 	// 根据图片URL域名设置正确的Referer
-	if strings.Contains(imageURL, "bilibili.com") || strings.Contains(imageURL, "hdslb.com") || strings.Contains(imageURL, "bilivideo.com") {
+	if safeurl.IsBilibiliMediaURL(imageURL) {
 		req.Header.Set("Referer", "https://www.bilibili.com/")
 	} else if strings.Contains(imageURL, "douyin.com") || strings.Contains(imageURL, "byteimg.com") || strings.Contains(imageURL, "bytecdn.cn") || strings.Contains(imageURL, "bytedance.com") || strings.Contains(imageURL, "snssdk.com") {
 		req.Header.Set("Referer", "https://www.douyin.com/")
@@ -884,10 +894,15 @@ func (h *Handlers) CreateTaskFromPreview(c *gin.Context) {
 			task.CoverURL = coverURL
 		}
 		if videoURL, ok := req.PreviewData["video_url"].(string); ok && videoURL != "" {
-			task.VideoURL = videoURL
+			// 仅接受平台 CDN/API 域名，拒绝任意 URL（防 SSRF）
+			if safeurl.IsTrustedDownloadURL(videoURL) {
+				task.VideoURL = videoURL
+			}
 		}
 		if audioURL, ok := req.PreviewData["audio_url"].(string); ok && audioURL != "" {
-			task.AudioURL = audioURL
+			if safeurl.IsTrustedDownloadURL(audioURL) {
+				task.AudioURL = audioURL
+			}
 		}
 		if platform, ok := req.PreviewData["platform"].(string); ok && platform != "" {
 			task.Platform = platform
@@ -1065,13 +1080,13 @@ func (h *Handlers) PreviewCollection(c *gin.Context) {
 		req.URL = extracted
 	}
 
-	// 根据URL判断平台
-	isDouyin := strings.Contains(req.URL, "douyin.com") || strings.Contains(req.URL, "iesdouyin.com") || strings.Contains(req.URL, "v.douyin.com")
-	isBilibili := strings.Contains(req.URL, "bilibili.com") || strings.Contains(req.URL, "b23.tv")
+	// 根据URL判断平台（Hostname 精确匹配，防 Contains 伪造）
+	isDouyin := safeurl.IsDouyinWebURL(req.URL)
+	isBilibili := safeurl.IsBilibiliWebURL(req.URL)
 
 	if isDouyin {
 		// 短链接直接走单视频解析，不尝试合集
-		if strings.Contains(req.URL, "v.douyin.com") {
+		if safeurl.IsDouyinShortLink(req.URL) {
 			videoInfo, vErr := h.mgr.ParseVideo(req.URL, "4k")
 			if vErr != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"detail": fmt.Sprintf("解析失败: %v", vErr)})
