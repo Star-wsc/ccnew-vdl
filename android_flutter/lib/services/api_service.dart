@@ -107,7 +107,7 @@ class ApiService {
           .timeout(const Duration(seconds: 5));
       if (resp.statusCode == 401) {
         lastUnauthorized = true;
-        rethrow;
+        throw Exception('unauthorized');
       }
       return jsonDecode(resp.body);
     } catch (e) {
