@@ -245,6 +245,11 @@ input[type=text]:focus,textarea:focus{border-color:rgba(0,255,163,.55);box-shado
     <span>任务<b id="tTot">0</b></span>
   </div>
   <span class="sp"></span>
+  <div id="authBadge" style="display:none;align-items:center;gap:8px;font-family:var(--mono);font-size:11px;color:var(--dim)">
+    <span style="width:7px;height:7px;border-radius:50%;background:var(--acc);box-shadow:0 0 8px var(--acc)"></span>
+    <span id="authUser">-</span>
+    <button class="btn sm danger" id="logoutBtn" style="padding:3px 10px;font-size:11px">退出登录</button>
+  </div>
   <nav class="tabs">
     <button class="tab on" data-v="deck">作战台</button>
     <button class="tab" data-v="cols">合集阵列</button>
@@ -333,6 +338,11 @@ input[type=text]:focus,textarea:focus{border-color:rgba(0,255,163,.55);box-shado
       <div class="sr"><label>解析引擎</label><span class="masked" id="ytVer">-</span><button class="btn sm" id="ytUpdB" onclick="updYt()">更新引擎</button></div>
     </div>
     <div class="glass sgrp">
+      <h3>[ 账号 ]</h3><div class="d">服务器开启鉴权时生效；桌面版本地模式通常无需登录</div>
+      <div class="sr"><label>登录状态</label><span class="masked" id="authMode">-</span><span class="masked" id="authUser2" style="color:var(--acc)"></span></div>
+      <div class="sr"><label></label><button class="btn sm danger" onclick="doLogout()">退出登录</button><span style="color:var(--faint);font-size:12px">退出后需重新输入用户名密码</span></div>
+    </div>
+    <div class="glass sgrp">
       <h3>[ 系统 ]</h3>
       <div class="sr"><label>程序版本</label><span class="masked" id="sVer">-</span></div>
       <div class="sr"><label>控制台窗口</label><button class="btn sm" id="conB" onclick="toggleCon()">显示</button><span style="color:var(--faint);font-size:12px">切换后台控制台可见性</span></div>
@@ -348,7 +358,56 @@ input[type=text]:focus,textarea:focus{border-color:rgba(0,255,163,.55);box-shado
 "use strict";
 const $=s=>document.querySelector(s),$$=s=>document.querySelectorAll(s);
 const esc=s=>String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-async function api(p,o){const r=await fetch(p,Object.assign({headers:{"Content-Type":"application/json"}},o||{}));let j=null;try{j=await r.json()}catch(e){}if(!r.ok){throw new Error((j&&(j.detail||j.error))||("HTTP "+r.status))}return j}
+
+/* ===== 鉴权：token 支持 URL / localStorage，401 回登录页 ===== */
+(function(){
+  try{
+    const q=new URLSearchParams(location.search);
+    const t=q.get("token");
+    if(t){localStorage.setItem("doubi_token",t);history.replaceState(null,"",location.pathname);}
+  }catch(e){}
+})();
+function authTok(){try{return localStorage.getItem("doubi_token")||""}catch(e){return""}}
+function authHdrs(extra){
+  const h=Object.assign({"Content-Type":"application/json"},extra||{});
+  const t=authTok();
+  if(t)h["Authorization"]="Bearer "+t;
+  return h;
+}
+function goLogin(){try{localStorage.removeItem("doubi_token")}catch(e){}location.replace("/");}
+
+async function api(p,o){
+  const opt=Object.assign({},o||{});
+  opt.headers=authHdrs(opt.headers);
+  const r=await fetch(p,opt);
+  if(r.status===401){goLogin();throw new Error("未登录")}
+  let j=null;try{j=await r.json()}catch(e){}
+  if(!r.ok){throw new Error((j&&(j.detail||j.error))||("HTTP "+r.status))}
+  return j;
+}
+
+async function loadAuthUI(){
+  try{
+    const s=await fetch("/api/auth/status",{credentials:"same-origin"}).then(r=>r.json());
+    const badge=$("#authBadge");
+    if(s.auth_mode==="off"){
+      if(badge)badge.style.display="none";
+      const m=$("#authMode");if(m)m.textContent="未开启（本机模式）";
+      return;
+    }
+    if(!s.logged_in){goLogin();return}
+    if(badge){badge.style.display="flex";$("#authUser").textContent=s.username||"已登录"}
+    const m=$("#authMode");if(m)m.textContent="已开启";
+    const u=$("#authUser2");if(u)u.textContent=s.username?(" · "+s.username):"";
+  }catch(e){}
+}
+
+async function doLogout(){
+  try{await fetch("/api/auth/logout",{method:"POST",headers:authHdrs(),credentials:"same-origin"})}catch(e){}
+  goLogin();
+}
+const _lb=$("#logoutBtn");if(_lb)_lb.addEventListener("click",doLogout);
+
 function toast(m,t){const e=document.createElement("div");e.className="toast"+(t?" "+t:"");e.textContent=m;$("#toasts").appendChild(e);setTimeout(()=>{e.style.opacity="0";e.style.transition="opacity .3s";setTimeout(()=>e.remove(),320)},2800)}
 function fspd(b){if(!b||b<=0)return"0 B/s";const u=["B/s","KB/s","MB/s","GB/s"];let i=0,v=b;while(v>=1024&&i<3){v/=1024;i++}return v.toFixed(v>=100?0:1)+" "+u[i]}
 function fsz(b){if(!b)return"-";const u=["B","KB","MB","GB"];let i=0,v=b;while(v>=1024&&i<3){v/=1024;i++}return v.toFixed(1)+" "+u[i]}
@@ -622,7 +681,7 @@ function closeM(){PLAYING=false;const v=$("#pv");if(v){v.pause();v.removeAttribu
 function cfm(t,b,ok){showModal("<h3>"+t+"</h3>","<div style='font-size:13.5px'>"+b+"</div>",'<button class="btn" onclick="closeM()">取消</button><button class="btn danger" id="okB">确认执行</button>');$("#okB").addEventListener("click",async()=>{try{await ok()}catch(e){}closeM()})}
 
 /* ===== 初始化 ===== */
-initSet();syncCon();poll();
+loadAuthUI();initSet();syncCon();poll();
 setInterval(poll,2500);setInterval(refreshLogs,3000);setInterval(refreshCols,9000);
 $("#taskList").addEventListener("change",function(e){if(e.target.dataset.sid){togSel(e.target.dataset.sid)}});
 </script>
