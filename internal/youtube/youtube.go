@@ -47,9 +47,12 @@ func FindYTDLP() (string, error) {
 	for _, dir := range dirs {
 		for _, n := range names {
 			p := filepath.Join(dir, n)
-			if _, err := os.Stat(p); err == nil {
-				return p, nil
+			fi, err := os.Stat(p)
+			if err != nil || fi.IsDir() {
+				// 必须是普通文件：目录名就叫 yt-dlp 时不能当成二进制
+				continue
 			}
+			return p, nil
 		}
 	}
 	return "", fmt.Errorf("未找到yt-dlp, 请将其放入程序目录的yt-dlp子目录")
