@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>DouBi 登录</title>
+<style>
+:root { color-scheme: light dark; }
+* { box-sizing: border-box; }
+body {
+  margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+  font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: #0f1419; color: #e7ecf1;
+}
+.card {
+  width: min(400px, 92vw); padding: 28px 24px; border-radius: 16px;
+  background: #1a2332; border: 1px solid #2a3548; box-shadow: 0 12px 40px rgba(0,0,0,.35);
+}
+h1 { margin: 0 0 6px; font-size: 22px; font-weight: 600; }
+.sub { margin: 0 0 22px; color: #8b9bb0; font-size: 13px; }
+label { display: block; font-size: 13px; color: #a8b6c8; margin: 12px 0 6px; }
+input {
+  width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid #334155;
+  background: #0f1419; color: #e7ecf1; font-size: 15px; outline: none;
+}
+input:focus { border-color: #3b82f6; }
+button {
+  width: 100%; margin-top: 20px; padding: 11px 12px; border: 0; border-radius: 10px;
+  background: #2563eb; color: #fff; font-size: 15px; font-weight: 600; cursor: pointer;
+}
+button:disabled { opacity: .55; cursor: not-allowed; }
+.err { margin-top: 12px; color: #f87171; font-size: 13px; min-height: 18px; }
+.hint { margin-top: 16px; color: #64748b; font-size: 12px; line-height: 1.5; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1 id="title">DouBi</h1>
+  <p class="sub" id="sub">视频下载器控制台</p>
+  <form id="form" autocomplete="off">
+    <label for="username">用户名</label>
+    <input id="username" name="username" required maxlength="64" />
+    <label for="password">密码</label>
+    <input id="password" name="password" type="password" required minlength="8" />
+    <label for="password2" id="password2-label" style="display:none">确认密码</label>
+    <input id="password2" type="password" style="display:none" minlength="8" />
+    <button type="submit" id="btn">登录</button>
+  </form>
+  <div class="err" id="err"></div>
+  <div class="hint">密码仅保存在本机服务器，不会上传。忘记密码可删除服务器上 auth.json 后重新初始化。</div>
+</div>
+<script>
+(function () {
+  var setup = false;
+  var title = document.getElementById('title');
+  var sub = document.getElementById('sub');
+  var btn = document.getElementById('btn');
+  var err = document.getElementById('err');
+  var p2 = document.getElementById('password2');
+  var p2l = document.getElementById('password2-label');
+
+  function showSetup() {
+    setup = true;
+    title.textContent = '初始化 DouBi';
+    sub.textContent = '首次使用，请设置管理员账号';
+    btn.textContent = '设置并登录';
+    p2.style.display = '';
+    p2l.style.display = '';
+  }
+
+  fetch('/api/auth/status').then(function (r) { return r.json(); }).then(function (s) {
+    if (s.auth_mode === 'off' || s.logged_in) {
+      location.replace('/');
+      return;
+    }
+    if (s.need_setup) showSetup();
+  }).catch(function () {});
+
+  document.getElementById('form').addEventListener('submit', function (e) {
+    e.preventDefault();
+    err.textContent = '';
+    var u = document.getElementById('username').value.trim();
+    var p = document.getElementById('password').value;
+    btn.disabled = true;
+    var url = setup ? '/api/auth/setup' : '/api/auth/login';
+    var body = { username: u, password: p };
+    if (setup) {
+      if (p !== p2.value) {
+        err.textContent = '两次密码不一致';
+        btn.disabled = false;
+        return;
+      }
+    }
+    fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify(body)
+    }).then(function (r) {
+      return r.json().then(function (j) { return { ok: r.ok, j: j }; });
+    }).then(function (res) {
+      if (res.ok) {
+        location.replace('/');
+        return;
+      }
+      err.textContent = (res.j && res.j.error) || '登录失败';
+      btn.disabled = false;
+    }).catch(function () {
+      err.textContent = '网络错误';
+      btn.disabled = false;
+    });
+  });
+})();
+</script>
+</body>
+</html>

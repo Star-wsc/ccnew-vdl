@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Star-wsc/ccnew-vdl/internal/auth"
 	"github.com/Star-wsc/ccnew-vdl/internal/config"
 	"github.com/Star-wsc/ccnew-vdl/internal/download"
 	"github.com/Star-wsc/ccnew-vdl/internal/youtube"
@@ -21,7 +22,7 @@ import (
 )
 
 // Version is set at build time via ldflags
-var Version = "1.3.5"
+var Version = "1.5.0"
 
 // killPortProcess 仅强杀同名的自身旧实例，避免误伤占用端口的其他程序。
 func killPortProcess(port string) {
@@ -147,14 +148,44 @@ func main() {
 	// 启动订阅检查器
 	h.startSubscriptionChecker()
 
+	// 鉴权：显式 AUTH_MODE 优先；桌面默认 off（点开即用），Docker/CLI 默认 on
+	authMode := auth.ResolveMode(os.Getenv("AUTH_MODE"), isDesktopMode())
+	gate, authErr := newAuthGate(authConfigDir(), authMode)
+	if authErr != nil {
+		log.Printf("[WARN] 鉴权模块初始化失败，已退回关闭鉴权: %v", authErr)
+		gate, _ = newAuthGate(authConfigDir(), "off")
+	}
+	log.Printf("[启动] 鉴权模式: %s", authMode)
+	if authMode == "on" && !gate.store.Configured() {
+		log.Println("[启动] 尚未设置管理员密码，请在浏览器打开本服务完成初始化")
+	}
+
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	r.Use(gin.Logger())
 	r.Use(gin.Recovery())
 	r.Use(corsMiddleware(cfg.Port))
+	r.Use(gate.middleware())
+
+	// 鉴权接口（中间件对这些路径放行）
+	r.GET("/api/auth/status", gate.handleStatus)
+	r.POST("/api/auth/setup", gate.handleSetup)
+	r.POST("/api/auth/login", gate.handleLogin)
+	r.POST("/api/auth/logout", gate.handleLogout)
 
 	// 所有 API 路由
-	r.GET("/", h.Index)
+	r.GET("/", func(c *gin.Context) {
+		// 鉴权开启且未登录/未初始化时，先出登录页，避免白屏调 API 401
+		if gate.enabled() && !gate.allow(c) {
+			exePath, _ := os.Executable()
+			loginPage := filepath.Join(getStaticDir(filepath.Dir(exePath)), "login.html")
+			if _, err := os.Stat(loginPage); err == nil {
+				c.File(loginPage)
+				return
+			}
+		}
+		h.Index(c)
+	})
 	r.GET("/api/config", h.GetConfig)
 	r.POST("/api/browse-folder", h.BrowseFolder)
 	r.POST("/api/download-dir", h.SetDownloadDir)

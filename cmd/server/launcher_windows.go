@@ -18,6 +18,12 @@ var (
 	procCreateMutex  = kernel32.NewProc("CreateMutexW")
 	childPSPid       int
 )
+
+// isDesktopMode Windows 默认桌面点开即用（免登录）。NO_DESKTOP=1 时按服务端处理。
+func isDesktopMode() bool {
+	v := strings.TrimSpace(os.Getenv("NO_DESKTOP"))
+	return v == "" || v == "0" || strings.EqualFold(v, "false")
+}
 // silentCmd 创建一个不会弹出窗口的命令
 func silentCmd(name string, args ...string) *exec.Cmd {
 	cmd := exec.Command(name, args...)

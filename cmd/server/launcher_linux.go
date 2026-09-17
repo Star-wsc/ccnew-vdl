@@ -9,6 +9,9 @@ import (
 	"syscall"
 )
 
+// isDesktopMode Linux/Docker 一律视为服务端，鉴权默认 on。
+func isDesktopMode() bool { return false }
+
 func launchDesktopWindow(port string, quit chan os.Signal) {
 	log.Println("桌面窗口模式仅支持 Windows，以纯服务器模式运行")
 	sigs := make(chan os.Signal, 1)
