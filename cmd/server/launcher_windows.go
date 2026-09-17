@@ -7,10 +7,11 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
-	"time"
 	"syscall"
+	"time"
 	"unsafe"
 )
 
@@ -102,6 +103,16 @@ func killChildProcess() {
 }
 
 func launchDesktopWindow(port string, quit chan os.Signal) {
+	// 无头模式（NO_DESKTOP=1）：只跑服务，不弹 WebView 窗口
+	if strings.TrimSpace(os.Getenv("NO_DESKTOP")) == "1" {
+		log.Println("NO_DESKTOP=1，跳过桌面窗口，纯服务端模式")
+		sigs := make(chan os.Signal, 1)
+		signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+		<-sigs
+		quit <- syscall.SIGTERM
+		return
+	}
+
 	// 单实例检查
 	if !acquireSingleInstance() {
 		log.Println("已有实例在运行，退出")
