@@ -59,6 +59,21 @@ button:disabled { opacity: .55; cursor: not-allowed; }
   var p2 = document.getElementById('password2');
   var p2l = document.getElementById('password2-label');
 
+  // 防止 / ↔ 登录页来回跳（抽搐刷新）
+  var bounceKey = 'doubi_auth_bounce';
+  var bounced = sessionStorage.getItem(bounceKey) === '1';
+
+  function goApp(token) {
+    sessionStorage.removeItem(bounceKey);
+    try { if (token) localStorage.setItem('doubi_token', token); } catch (e) {}
+    // 带 token 跳转：中间件认 query token，不依赖 Set-Cookie 是否已生效
+    if (token) {
+      location.replace('/?token=' + encodeURIComponent(token));
+    } else {
+      location.replace('/');
+    }
+  }
+
   function showSetup() {
     setup = true;
     title.textContent = '初始化 DouBi';
@@ -68,12 +83,17 @@ button:disabled { opacity: .55; cursor: not-allowed; }
     p2l.style.display = '';
   }
 
-  fetch('/api/auth/status').then(function (r) { return r.json(); }).then(function (s) {
-    if (s.auth_mode === 'off' || s.logged_in) {
-      location.replace('/');
-      return;
-    }
+  // 本页已带 token（从登录返回）→ 直接进控制台
+  var q = new URLSearchParams(location.search);
+  if (q.get('token')) { goApp(q.get('token')); return; }
+
+  fetch('/api/auth/status', { credentials: 'same-origin' }).then(function (r) {
+    return r.json();
+  }).then(function (s) {
+    if (s.auth_mode === 'off') { goApp(null); return; }
+    if (s.logged_in) { goApp(null); return; }
     if (s.need_setup) showSetup();
+    // 已配置但未登录 → 停在登录表单，不再自动跳 /
   }).catch(function () {});
 
   document.getElementById('form').addEventListener('submit', function (e) {
@@ -84,12 +104,10 @@ button:disabled { opacity: .55; cursor: not-allowed; }
     btn.disabled = true;
     var url = setup ? '/api/auth/setup' : '/api/auth/login';
     var body = { username: u, password: p };
-    if (setup) {
-      if (p !== p2.value) {
-        err.textContent = '两次密码不一致';
-        btn.disabled = false;
-        return;
-      }
+    if (setup && p !== p2.value) {
+      err.textContent = '两次密码不一致';
+      btn.disabled = false;
+      return;
     }
     fetch(url, {
       method: 'POST',
@@ -100,7 +118,14 @@ button:disabled { opacity: .55; cursor: not-allowed; }
       return r.json().then(function (j) { return { ok: r.ok, j: j }; });
     }).then(function (res) {
       if (res.ok) {
-        location.replace('/');
+        if (bounced) {
+          // 上次跳转失败过：这次用 token 强跳，不再依赖 Cookie
+          goApp(res.j && res.j.token);
+          return;
+        }
+        sessionStorage.setItem(bounceKey, '1');
+        // 先带上 token 跳转，避免 Cookie 未写入时 / 又吐回登录页
+        goApp(res.j && res.j.token);
         return;
       }
       err.textContent = (res.j && res.j.error) || '登录失败';
