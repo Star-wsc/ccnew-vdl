@@ -339,7 +339,7 @@ input[type=text]:focus,input[type=password]:focus,textarea:focus{border-color:rg
     </div>
     <div class="glass sgrp">
       <h3>[ 账号 ]</h3><div class="d">服务器开启鉴权时生效；桌面版本地模式通常无需登录</div>
-      <div class="sr"><label>登录状态</label><span class="masked" id="authMode">-</span><span class="masked" id="authUser2" style="color:var(--acc)"></span></div>
+      <div class="sr"><label>登录状态</label><span class="masked" id="authMode">-</span><span class="masked" id="authUser2" style="color:var(--acc);margin-left:8px"></span></div>
       <div class="sr"><label>新用户名</label><input type="text" id="chUser" placeholder="留空则不修改"></div>
       <div class="sr"><label>旧密码</label><input type="password" id="chOld" autocomplete="current-password"></div>
       <div class="sr"><label>新密码</label><input type="password" id="chNew" autocomplete="new-password" placeholder="至少 8 位"></div>
@@ -415,7 +415,7 @@ async function loadAuthUI(){
     if(!s.logged_in){goLogin();return}
     if(badge){badge.style.display="flex";$("#authUser").textContent=s.username||"已登录"}
     const m=$("#authMode");if(m)m.textContent="已开启";
-    const u=$("#authUser2");if(u)u.textContent=s.username?(" · "+s.username):"";
+    const u=$("#authUser2");if(u)u.textContent=s.username||"";
   }catch(e){}
 }
 
