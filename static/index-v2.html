@@ -71,8 +71,8 @@ main{flex:1;overflow-y:auto;position:relative;z-index:1}
 .ibtn{width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;border-radius:8px;border:1px solid transparent;background:transparent;color:var(--dim);cursor:pointer;transition:.15s}
 .ibtn:hover{color:var(--acc);background:var(--accd)}
 .ibtn.dg:hover{color:var(--err);background:var(--errd)}
-input[type=text],textarea{background:rgba(4,7,12,.6);border:1px solid var(--line2);border-radius:9px;color:var(--txt);padding:10px 14px;font-size:13.5px;outline:0;width:100%;font-family:var(--mono);transition:.15s}
-input[type=text]:focus,textarea:focus{border-color:rgba(0,255,163,.55);box-shadow:0 0 0 3px rgba(0,255,163,.09)}
+input[type=text],input[type=password],textarea{background:rgba(4,7,12,.6);border:1px solid var(--line2);border-radius:9px;color:var(--txt);padding:10px 14px;font-size:13.5px;outline:0;width:100%;font-family:var(--mono);transition:.15s}
+input[type=text]:focus,input[type=password]:focus,textarea:focus{border-color:rgba(0,255,163,.55);box-shadow:0 0 0 3px rgba(0,255,163,.09)}
 .pill{display:inline-flex;padding:3px 10px;border-radius:999px;font-size:11px;font-family:var(--mono);font-weight:700}
 .pill.downloading{background:var(--cyd);color:var(--cy)}
 .pill.completed{background:var(--accd);color:var(--acc)}
@@ -444,16 +444,14 @@ async function loadDevices(){
   const el=$("#devList");if(!el)return;
   try{
     const r=await api("/api/auth/devices");
-    const list=r.devices||[];
+    const list=(r.devices||[]).filter(d=>!d.revoked);
     if(!list.length){el.innerHTML='<span style="color:var(--faint)">暂无设备密钥</span>';return}
     el.innerHTML=list.map(d=>{
-      const st=d.revoked?'<span style="color:var(--err)">已吊销</span>':'<span style="color:var(--acc)">有效</span>';
       return '<div style="margin:4px 0;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+
         '<b style="color:var(--txt)">'+esc(d.name)+'</b>'+
         '<span style="font-family:var(--mono);color:var(--faint)">'+esc(d.prefix||d.id)+'</span>'+
-        st+
         (d.last_used_at?'<span style="color:var(--faint)">最近 '+esc(d.last_used_at)+'</span>':'')+
-        (d.revoked?'':' <button class="btn sm danger" style="padding:2px 8px;font-size:11px" onclick="revokeDevice(\''+esc(d.id)+'\')">吊销</button>')+
+        ' <button class="btn sm danger" style="padding:2px 8px;font-size:11px" onclick="revokeDevice(\''+esc(d.id)+'\',\''+esc(d.name)+'\')">吊销删除</button>'+
         '</div>';
     }).join("");
   }catch(e){el.textContent=e.message||"加载失败"}
@@ -471,12 +469,15 @@ async function createDeviceKey(){
     loadDevices();
   }catch(e){toast(e.message||"生成失败","err")}
 }
-async function revokeDevice(id){
-  try{
-    await api("/api/auth/devices/"+encodeURIComponent(id),{method:"DELETE"});
-    toast("已吊销");
-    loadDevices();
-  }catch(e){toast(e.message||"吊销失败","err")}
+async function revokeDevice(id,name){
+  cfm("吊销接入密钥","确定删除设备「"+esc(name||id)+"」的接入密钥吗？删除后该客户端将立即无法调用接口，无法恢复。",async()=>{
+    try{
+      await api("/api/auth/devices/"+encodeURIComponent(id),{method:"DELETE"});
+      toast("已吊销并删除");
+      const el=$("#devNewKey");if(el)el.innerHTML="";
+      loadDevices();
+    }catch(e){toast(e.message||"吊销失败","err")}
+  })
 }
 const _lb=$("#logoutBtn");if(_lb)_lb.addEventListener("click",doLogout);
 

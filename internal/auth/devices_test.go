@@ -29,6 +29,9 @@ func TestDeviceKeyLifecycle(t *testing.T) {
 	if ds.ValidateKey(key) {
 		t.Fatal("revoked key still valid")
 	}
+	if len(ds.ListDevices()) != 0 {
+		t.Fatalf("revoked device should be removed from list, got %+v", ds.ListDevices())
+	}
 	ds2, err := NewDeviceStore(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -36,8 +39,7 @@ func TestDeviceKeyLifecycle(t *testing.T) {
 	if ds2.ValidateKey(key) {
 		t.Fatal("revoked key valid after reload")
 	}
-	list := ds2.ListDevices()
-	if len(list) != 1 || !list[0].Revoked || list[0].KeyHash != "" {
-		t.Fatalf("list leak or bad: %+v", list)
+	if len(ds2.ListDevices()) != 0 {
+		t.Fatalf("list after reload should be empty: %+v", ds2.ListDevices())
 	}
 }

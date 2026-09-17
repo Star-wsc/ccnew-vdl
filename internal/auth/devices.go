@@ -135,19 +135,30 @@ func (s *DeviceStore) ListDevices() []Device {
 	return out
 }
 
+// RevokeDevice 吊销并从列表删除该设备记录（密钥立即失效，界面不再显示）。
 func (s *DeviceStore) RevokeDevice(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for i := range s.list {
-		if s.list[i].ID == id {
-			s.list[i].Revoked = true
-			return s.persist()
+	out := s.list[:0]
+	found := false
+	for _, d := range s.list {
+		if d.ID == id {
+			found = true
+			continue
 		}
+		out = append(out, d)
 	}
-	return ErrDeviceNotFound
+	if !found {
+		return ErrDeviceNotFound
+	}
+	s.list = out
+	if s.list == nil {
+		s.list = []Device{}
+	}
+	return s.persist()
 }
 
-// ValidateKey 校验明文密钥，成功则异步更新 last_used。
+// ValidateKey 校验明文密钥，成功则更新 last_used。
 func (s *DeviceStore) ValidateKey(key string) bool {
 	if key == "" || !strings.HasPrefix(key, deviceKeyPrefix) {
 		return false
@@ -162,7 +173,6 @@ func (s *DeviceStore) ValidateKey(key string) bool {
 		}
 		if s.list[i].KeyHash == h {
 			s.list[i].LastUsedAt = now
-			// last_used 写盘失败不影响鉴权
 			_ = s.persist()
 			return true
 		}
