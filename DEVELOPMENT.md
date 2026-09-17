@@ -22,12 +22,16 @@
 │  - DASH 音视频下载 + ffmpeg 合并            │
 │  - 合集管理/订阅刷新/移动端流式接口           │
 │  - Web 控制台(DouBi 控制台) static/         │
+│  - 账密鉴权 AUTH_MODE=on（Linux 默认）       │
+│    auth.json: ~/.config/ccnew-vdl/         │
 └──────────────────────────────────────────┘
 ```
 
 - 手机端**不做**任何解析/下载/合并（历史教训：Go 二进制在 Android 被 Seccomp 禁止
   fork/exec，FFmpeg so 有文本重定位问题 → 全部挪服务器，APP 只是壳）。
 - 任务隔离：APP 创建的任务带 `source=app`，Web 端查询不带 source 看全部。
+- **Ubuntu/CLI 默认开鉴权**：首次浏览器打开需设置管理员密码；APP 在设置页登录。
+  Windows 桌面版默认 `AUTH_MODE=off`（点开即用）。
 
 ## 二、环境
 
@@ -38,6 +42,7 @@
 | adb | `%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe` |
 | 服务器 | `<user>@<server-ip>`，目录 `/home/<user>/ccnew-vdl-dev/` |
 | 服务器服务 | systemd `ccnew-vdl`，Restart=always，端口 18000 |
+| 服务器鉴权 | 默认 `AUTH_MODE=on`；`auth.json` 在运行用户 `~/.config/ccnew-vdl/auth.json`（0600） |
 | 服务器日志 | `~/ccnew-vdl-dev/logs/server.log`（GIN 请求日志在 journal） |
 | 手机 | Xiaomi 17 Pro Max，无线调试（adb mdns 自动发现） |
 | APK 产物 | `android_flutter/build/app/outputs/flutter-apk/app-debug.apk` → 桌面 `DouBi下载器.apk` |
@@ -72,18 +77,22 @@
 
 ### 服务器关键接口
 ```
+GET  /api/auth/status              鉴权状态(公开: auth_mode/need_setup/logged_in)
+POST /api/auth/setup               首次设置管理员(仅未配置时)
+POST /api/auth/login               登录 → token + Set-Cookie
+POST /api/auth/logout              注销
 POST /api/tasks                       创建任务/预览(quality=preview)
 POST /api/tasks/create-from-preview   从预览创建(带audio_url, source)
-GET  /api/tasks?source=app            任务列表(隔离)
-GET  /api/tasks/:id/download          下载已完成文件
-GET  /api/stats?source=app            统计(含global_speed)
+GET  /api/tasks?source=app            任务列表(隔离；需登录)
+GET  /api/tasks/:id/download          下载已完成文件(需登录；可 ?token=)
+GET  /api/stats?source=app            统计(含global_speed；需登录)
 POST /api/collections                 创建合集(必须带auto_download=true)
-GET  /api/collections/:id/videos/:idx/file  播放合集内视频
+GET  /api/collections/:id/videos/:idx/file  播放合集内视频(可 ?token=)
 DELETE /api/collections/videos/:id    删合集内视频(VideoID或BVID匹配)
 POST /api/collections/:id/subscribe   订阅开关
-POST /api/settings                    cookie设置(全量同步mgr)
-POST /api/bilibili/cookie             cookie设置(已修复为全量同步)
-GET  /api/bilibili/cookie             查cookie状态(掩码)
+POST /api/settings                    cookie/代理设置(需登录，全量同步mgr)
+POST /api/bilibili/cookie             cookie设置(已修复为全量同步；需登录)
+GET  /api/bilibili/cookie             查cookie状态(掩码；需登录)
 ```
 
 ## 四、开发流程
@@ -93,7 +102,15 @@ GET  /api/bilibili/cookie             查cookie状态(掩码)
 2. 按 CLAUDE.md 版本规则确定新版本号
 3. 交叉编译 + scp + kill/cp 部署（见 CLAUDE.md 第三节）
 4. `curl /api/config` 验证版本号变化
-5. 涉及静态页面：单独 `scp static/index-v2.html` 到服务器 `static/` 目录
+5. 涉及静态页面：单独 `scp static/index-v2.html static/login.html` 到服务器 `static/` 目录
+6. **鉴权相关改动后**：
+   ```bash
+   curl -s http://127.0.0.1:18000/api/auth/status
+   # 期望: auth_mode=on；未 setup 时 need_setup=true
+   # 浏览器打开 http://服务器:18000 完成初始化；APP 设置页登录
+   ```
+7. Ubuntu 上 `auth.json` 路径与 systemd 运行用户一致（一般是 `/home/<user>/.config/ccnew-vdl/auth.json`）；
+   **不要**把 `auth.json` scp 进仓库目录或提交 git。
 
 ### 移动端迭代
 1. 改代码 → `flutter analyze lib/` 检查
@@ -138,6 +155,8 @@ GET  /api/bilibili/cookie             查cookie状态(掩码)
 | 离线时界面被清空、缓存被覆盖 | getStats/getTasks 吞网络错误返回空数组 | _refresh 先 checkConnection，失败不动本地数据 |
 | 流量消耗大 | 无脑 2s 三连击轮询，后台也在跑 | 事件驱动+CD+5min兜底+下载2s实时+后台零请求 |
 | 播放器打不开合集视频 | APP 拿 bvid 调 /api/tasks/:id/download（404） | 服务端新增 /api/collections/:id/videos/:idx/file |
+| 服务器升鉴权后 APP/Web 全 401 | 未 setup / 未登录 | 浏览器完成 setup；APP 设置页登录；curl 用 Cookie 或 `?token=` |
+| APP 未登录时任务列表被清空 | 401 被当成空列表回写缓存 | checkConnection 走 auth/status；未登录不拉业务、不写缓存 |
 
 ### 构建/环境类
 | 问题 | 根因 | 解决 |
@@ -155,6 +174,11 @@ GET  /api/bilibili/cookie             查cookie状态(掩码)
 ## 六、验证习惯（每次改完必做）
 
 1. **服务器**：go build 通过 → 部署 → curl /api/config 看版本 → curl 相关接口看行为
-2. **移动端**：flutter analyze → 装机 → adb 截屏走查关键页面（日间/夜间都要看）
-3. **多主题检查**：任何 UI 改动，日间模式+夜间模式各截一次，重点看文字与背景对比度
-4. **离线检查**：杀服务器进程 → APP 操作 → 界面应保持缓存内容且显示"未连接"
+2. **鉴权（Ubuntu 默认 on）**：
+   - `curl /api/auth/status` → `auth_mode` / `need_setup` / `logged_in`
+   - 无凭证 `GET /api/tasks` → **401**
+   - 登录后带 Cookie/Bearer → **200**
+3. **移动端**：flutter analyze → 装机 → adb 截屏走查关键页面（日间/夜间都要看）
+4. **多主题检查**：任何 UI 改动，日间模式+夜间模式各截一次，重点看文字与背景对比度
+5. **离线检查**：杀服务器进程 → APP 操作 → 界面应保持缓存内容且显示"未连接"
+6. **未登录检查（鉴权服务器）**：清 APP token → 列表应保持本地缓存，不得被空数据覆盖

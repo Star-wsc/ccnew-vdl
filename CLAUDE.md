@@ -88,13 +88,18 @@ mv ~/.gradle/init.gradle.bak ~/.gradle/init.gradle
 ```bash
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w -X main.Version=X.Y.Z" -o server-linux-amd64 ./cmd/server/
 scp server-linux-amd64 <user>@<server-ip>:/tmp/
+# 静态页（含登录页）同步；鉴权版本起 login.html 必须一起上
+scp static/index-v2.html static/login.html <user>@<server-ip>:/home/<user>/ccnew-vdl-dev/static/
 # 先 kill 再 cp（直接 cp 会报"文本文件忙"），systemd Restart=always 5秒后自动拉起
 ssh "kill -9 \$(pgrep -f ccnew-vdl)"
 ssh "cp /tmp/server-linux-amd64 /home/<user>/ccnew-vdl-dev/ccnew-vdl && chmod +x ..."
 sleep 8 && curl http://127.0.0.1:18000/api/config  # 验证版本
+# 鉴权：Linux 默认 AUTH_MODE=on；首次需浏览器 setup，curl 业务接口会 401
+curl -s http://127.0.0.1:18000/api/auth/status
 ```
 - 服务器 sudo 需要密码不可用，一律用 kill + systemd 自愈代替 systemctl。
 - 注意：kill 与 cp 分两条 ssh 执行，合并执行常因连接中断导致 cp 没跑（校验 md5！）。
+- `auth.json` 在运行用户 `~/.config/ccnew-vdl/`，**不进仓库、不 scp 进程序目录**。
 
 ### adb / 真机调试
 - Git Bash 下 adb shell 内的绝对路径必须加 `export MSYS_NO_PATHCONV=1`，
