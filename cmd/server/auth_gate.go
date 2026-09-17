@@ -62,6 +62,22 @@ func (g *authGate) allow(c *gin.Context) bool {
 	return g.store.Validate(g.tokenFromRequest(c))
 }
 
+// clientKey 登录限速用的客户端标识。
+// 反代（Lucky/Hermes/Nginx 等）场景优先取 X-Forwarded-For 首个 IP，
+// 避免所有人共享反代 IP 导致一人错密码锁死全家。
+func clientKey(c *gin.Context) string {
+	if xff := c.GetHeader("X-Forwarded-For"); xff != "" {
+		parts := strings.Split(xff, ",")
+		if ip := strings.TrimSpace(parts[0]); ip != "" {
+			return ip
+		}
+	}
+	if xri := c.GetHeader("X-Real-IP"); xri != "" {
+		return strings.TrimSpace(xri)
+	}
+	return c.ClientIP()
+}
+
 func (g *authGate) tooManyFails(ip string) bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -196,7 +212,7 @@ func (g *authGate) handleLogin(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "need_setup", "need_setup": true})
 		return
 	}
-	ip := c.ClientIP()
+	ip := clientKey(c)
 	if g.tooManyFails(ip) {
 		c.JSON(http.StatusTooManyRequests, gin.H{"error": "尝试过于频繁，请稍后再试"})
 		return
