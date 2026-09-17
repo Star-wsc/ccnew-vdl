@@ -6,6 +6,7 @@ import 'services/api_service.dart';
 import 'services/local_store.dart';
 import 'services/theme_provider.dart';
 import 'pages/home_page.dart';
+import 'pages/login_page.dart';
 import 'pages/setup_page.dart';
 
 void main() async {
@@ -27,17 +28,38 @@ void main() async {
   );
 }
 
+/// 启动路由：未配置→设置；在线且需登录→登录；否则主页（含离线缓存）
+enum _StartRoute { setup, login, needSetup, home }
+
 class DouBiApp extends StatelessWidget {
   const DouBiApp({super.key});
 
-  /// 路由决策：配置过服务器就尽量进主页。
-  /// 服务器不可达但手机有缓存 → 离线模式进主页（轮询自动重连恢复）
-  static Future<bool> _shouldGoHome() async {
-    if (ApiService.baseUrl.isEmpty) return false;
-    if (await ApiService.checkConnection()) return true;
-    final tasks = await LocalStore.loadTasks();
-    final cols = await LocalStore.loadCollections();
-    return tasks.isNotEmpty || cols.isNotEmpty;
+  static Future<({_StartRoute route, bool needSetup})> _decide() async {
+    if (ApiService.baseUrl.isEmpty) {
+      return (route: _StartRoute.setup, needSetup: false);
+    }
+    final online = await ApiService.checkConnection();
+    if (!online) {
+      final tasks = await LocalStore.loadTasks();
+      final cols = await LocalStore.loadCollections();
+      if (tasks.isNotEmpty || cols.isNotEmpty) {
+        return (route: _StartRoute.home, needSetup: false); // 离线缓存
+      }
+      return (route: _StartRoute.setup, needSetup: false);
+    }
+    final auth = await ApiService.authStatus();
+    if (auth['auth_mode'] == 'off') {
+      return (route: _StartRoute.home, needSetup: false);
+    }
+    final hasToken =
+        ApiService.authToken != null && ApiService.authToken!.isNotEmpty;
+    if (auth['logged_in'] == true || hasToken) {
+      return (route: _StartRoute.home, needSetup: false);
+    }
+    if (auth['need_setup'] == true) {
+      return (route: _StartRoute.needSetup, needSetup: true);
+    }
+    return (route: _StartRoute.login, needSetup: false);
   }
 
   @override
@@ -48,12 +70,22 @@ class DouBiApp extends StatelessWidget {
       title: 'DouBi下载器',
       debugShowCheckedModeBanner: false,
       theme: theme.theme,
-      home: FutureBuilder<bool>(
-        future: _shouldGoHome(),
+      home: FutureBuilder<({_StartRoute route, bool needSetup})>(
+        future: _decide(),
         builder: (ctx, snap) {
           if (snap.connectionState != ConnectionState.done) return const _Splash();
-          if (snap.data == true) return const HomePage();
-          return const SetupPage();
+          final d = snap.data;
+          if (d == null) return const SetupPage();
+          switch (d.route) {
+            case _StartRoute.home:
+              return const HomePage();
+            case _StartRoute.login:
+              return const LoginPage();
+            case _StartRoute.needSetup:
+              return const LoginPage(needSetup: true);
+            case _StartRoute.setup:
+              return const SetupPage();
+          }
         },
       ),
     );

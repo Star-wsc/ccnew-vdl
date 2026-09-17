@@ -2,6 +2,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
 import 'home_page.dart';
+import 'login_page.dart';
 
 class SetupPage extends StatefulWidget {
   const SetupPage({super.key});
@@ -17,7 +18,6 @@ class _SetupPageState extends State<SetupPage> {
   @override
   void initState() {
     super.initState();
-    // 预填常见端口
     _ctrl.text = ApiService.baseUrl;
   }
 
@@ -25,28 +25,34 @@ class _SetupPageState extends State<SetupPage> {
     final url = _ctrl.text.trim();
     if (url.isEmpty) { setState(() => _error = '请输入服务器地址'); return; }
 
-    // 自动补 http://
     final normalized = url.startsWith('http') ? url : 'http://$url';
     setState(() { _testing = true; _error = null; });
 
     await ApiService.setServerUrl(normalized);
     final ok = await ApiService.checkConnection();
 
-    if (ok && mounted) {
-      // 服务器可达即可进主页；若开启鉴权且未登录，主页保持缓存/空列表，设置页可登录
-      final auth = await ApiService.authStatus();
-      if (auth['need_setup'] == true) {
-        setState(() {
-          _testing = false;
-          _error = '请先用浏览器打开该地址完成初始化设置密码，再回到 APP 登录';
-        });
-        return;
-      }
+    if (!mounted) return;
+    if (!ok) {
+      setState(() { _testing = false; _error = '无法连接到服务器，请检查地址和端口'; });
+      return;
+    }
+
+    final auth = await ApiService.authStatus();
+    if (!mounted) return;
+    if (auth['auth_mode'] == 'off') {
       Navigator.pushReplacement(context,
         MaterialPageRoute(builder: (_) => const HomePage()));
-    } else {
-      setState(() { _testing = false; _error = '无法连接到服务器，请检查地址和端口'; });
+      return;
     }
+    if (auth['logged_in'] == true ||
+        (ApiService.authToken != null && ApiService.authToken!.isNotEmpty)) {
+      Navigator.pushReplacement(context,
+        MaterialPageRoute(builder: (_) => const HomePage()));
+      return;
+    }
+    // 开了鉴权且未登录 → 必须走登录页，不能直接进主页
+    Navigator.pushReplacement(context,
+      MaterialPageRoute(builder: (_) => LoginPage(needSetup: auth['need_setup'] == true)));
   }
 
   @override
