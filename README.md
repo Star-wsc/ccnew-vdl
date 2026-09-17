@@ -99,8 +99,28 @@ Android APP      ─┘         │
 ```
 
 - 服务端版本（`v*`）与移动端版本（`app-v*`）**独立迭代**
-- 环境变量：`PORT`（默认18000）、`DOWNLOAD_DIR`、`LOG_DIR`、`BILIBILI_COOKIE`、`DOUYIN_COOKIE`
+- 环境变量：`PORT`（默认18000）、`DOWNLOAD_DIR`、`LOG_DIR`、`BILIBILI_COOKIE`、`DOUYIN_COOKIE`、`AUTH_MODE`
 - 配置文件（Cookie 等）持久化在 `/root/.config/ccnew-vdl/config.json`
+
+---
+
+## 🔐 访问鉴权（Docker / CLI 默认开启）
+
+| 形态 | 默认鉴权 | 说明 |
+|---|---|---|
+| Windows 桌面版 | **关闭** | 仅本机点开即用 |
+| Docker / CLI 服务器 | **开启** | 首次打开 Web 需设置管理员密码 |
+
+- 环境变量：`AUTH_MODE=on|off`（显式优先；未设置时桌面 off、服务端 on）
+- 管理员密码使用 bcrypt 哈希存储于 `~/.config/ccnew-vdl/auth.json`（0600），**无出厂默认密码**
+- 未登录时业务 API 返回 401；APP 在「设置 → 账号登录」中登录
+- 媒体播放/下载可用请求头 `Authorization: Bearer <token>`，或链接参数 `?token=`
+
+> ⚠️ **公网 / 内网穿透必须在反代（如 Lucky、Caddy、Nginx）上开启 HTTPS**，并设置强密码。  
+> 禁止将 `http://公网IP:18000` 明文暴露在公网——密码与 Cookie 可被窃听。  
+> 建议：反代域名 → 后端 `http://内网IP:18000`，应用保持 HTTP，TLS 在反代终结。
+
+反代示例（Lucky / 通用）：将域名反代到本机 `18000`，开启 SSL；Docker 仍可 `0.0.0.0:18000` 映射，但**防火墙应仅允许可信来源或反代可达**。
 
 ---
 

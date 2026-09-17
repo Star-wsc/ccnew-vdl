@@ -45,6 +45,10 @@ func (g *authGate) tokenFromRequest(c *gin.Context) string {
 	if v := c.GetHeader("X-Auth-Token"); v != "" {
 		return strings.TrimSpace(v)
 	}
+	// 媒体播放器/Dio 下载往往不便带 Header，允许 query token（仅 GET 媒体场景）
+	if v := c.Query("token"); v != "" {
+		return strings.TrimSpace(v)
+	}
 	if ck, err := c.Cookie(sessionCookieName); err == nil {
 		return strings.TrimSpace(ck)
 	}

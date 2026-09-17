@@ -17,10 +17,14 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage> {
   final _serverCtrl = TextEditingController();
   final _ytProxyCtrl = TextEditingController();
+  final _userCtrl = TextEditingController();
+  final _passCtrl = TextEditingController();
   bool _testing = false;
   bool _savingYt = false;
+  bool _loggingIn = false;
   String? _toast;
   Map<String, dynamic> _config = {};
+  Map<String, dynamic> _auth = {};
   bool _serverOnline = false;
   // 版本与更新
   String _appVersion = '';
@@ -67,16 +71,50 @@ class _SettingsPageState extends State<SettingsPage> {
   Future<void> _checkServer() async {
     _serverOnline = await ApiService.checkConnection();
     if (_serverOnline) {
+      _auth = await ApiService.authStatus();
+      _userCtrl.text = ApiService.authUsername.isNotEmpty
+          ? ApiService.authUsername
+          : ((_auth['username'] ?? '') as String);
       _config = await ApiService.getConfig();
       await _loadYtProxy();
     }
     if (mounted) setState(() {});
   }
 
+  Future<void> _login() async {
+    final u = _userCtrl.text.trim();
+    final p = _passCtrl.text;
+    if (u.isEmpty || p.isEmpty) {
+      _showToast('请输入用户名和密码');
+      return;
+    }
+    setState(() => _loggingIn = true);
+    final r = await ApiService.login(u, p);
+    if (!mounted) return;
+    setState(() => _loggingIn = false);
+    if (r['ok'] == true) {
+      _showToast('登录成功');
+      _passCtrl.clear();
+      await _checkServer();
+    } else {
+      _showToast((r['error'] ?? '登录失败').toString());
+    }
+  }
+
+  Future<void> _logout() async {
+    await ApiService.logout();
+    if (mounted) _showToast('已退出登录');
+    await _checkServer();
+  }
+
   /// 加载服务器当前的YouTube代理设置
   Future<void> _loadYtProxy() async {
     try {
-      final resp = await http.get(Uri.parse('${ApiService.baseUrl}/api/settings'))
+      final resp = await http.get(Uri.parse('${ApiService.baseUrl}/api/settings'),
+              headers: {
+            if (ApiService.authToken != null && ApiService.authToken!.isNotEmpty)
+              'Authorization': 'Bearer ${ApiService.authToken}',
+          })
           .timeout(const Duration(seconds: 5));
       if (resp.statusCode == 200) {
         final v = (jsonDecode(resp.body) as Map<String, dynamic>)['yt_proxy'] ?? '';
@@ -91,10 +129,14 @@ class _SettingsPageState extends State<SettingsPage> {
     try {
       final resp = await http.post(
         Uri.parse('${ApiService.baseUrl}/api/settings'),
-        headers: {'Content-Type': 'application/json'},
+        headers: {
+          'Content-Type': 'application/json',
+          if (ApiService.authToken != null && ApiService.authToken!.isNotEmpty)
+            'Authorization': 'Bearer ${ApiService.authToken}',
+        },
         body: jsonEncode({'yt_proxy': _ytProxyCtrl.text.trim()}),
       ).timeout(const Duration(seconds: 8));
-      if (mounted) _showToast(resp.statusCode == 200 ? 'YouTube代理已保存' : '保存失败');
+      if (mounted) _showToast(resp.statusCode == 200 ? 'YouTube代理已保存' : (resp.statusCode == 401 ? '请先登录' : '保存失败'));
     } catch (_) {
       if (mounted) _showToast('保存失败');
     }
@@ -160,6 +202,35 @@ class _SettingsPageState extends State<SettingsPage> {
               _input(tp, _serverCtrl, '服务器地址', 'http://192.168.x.x:18000', Icons.language_rounded),
               const SizedBox(height: 12),
               SizedBox(width: double.infinity, child: _btn(tp, '测试连接', Icons.wifi_find_rounded, onPressed: _testing ? null : _testConnection, loading: _testing)),
+            ])),
+            const SizedBox(height: 16),
+            // 登录（服务器开启鉴权时）
+            _section(tp, Icons.lock_rounded, '账号登录'),
+            _card(tp, Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              if (_auth['auth_mode'] == 'off')
+                Text('当前服务器未开启登录（如 Windows 桌面版），无需账号。',
+                    style: TextStyle(color: tp.textDim, fontSize: 12))
+              else if (_auth['need_setup'] == true)
+                Text('请先用浏览器打开服务器地址完成初始化设置密码，再回到 APP 登录。',
+                    style: TextStyle(color: tp.error, fontSize: 12))
+              else ...[
+                if (ApiService.authToken != null && ApiService.authToken!.isNotEmpty)
+                  Row(children: [
+                    Icon(Icons.verified_user_rounded, color: const Color(0xFF00D09C), size: 18),
+                    const SizedBox(width: 8),
+                    Expanded(child: Text('已登录：${ApiService.authUsername}',
+                        style: TextStyle(color: tp.textPrimary, fontSize: 13))),
+                    TextButton(onPressed: _logout, child: Text('退出', style: TextStyle(color: tp.error))),
+                  ])
+                else ...[
+                  _input(tp, _userCtrl, '用户名', 'admin', Icons.person_rounded),
+                  const SizedBox(height: 12),
+                  _input(tp, _passCtrl, '密码', '••••••••', Icons.lock_rounded, obscure: true),
+                  const SizedBox(height: 12),
+                  SizedBox(width: double.infinity, child: _btn(tp, '登录', Icons.login_rounded,
+                      onPressed: _loggingIn || !_serverOnline ? null : _login, loading: _loggingIn)),
+                ],
+              ],
             ])),
             const SizedBox(height: 16),
             // YouTube 代理（服务器端设置）
@@ -245,7 +316,7 @@ class _SettingsPageState extends State<SettingsPage> {
     ),
   );
 
-  Widget _input(ThemeProvider tp, TextEditingController ctrl, String label, String hint, IconData icon) {
+  Widget _input(ThemeProvider tp, TextEditingController ctrl, String label, String hint, IconData icon, {bool obscure = false}) {
     return ClipRRect(
       borderRadius: BorderRadius.circular(12),
       child: BackdropFilter(
@@ -254,6 +325,9 @@ class _SettingsPageState extends State<SettingsPage> {
           decoration: BoxDecoration(color: tp.glass, borderRadius: BorderRadius.circular(12),
             border: Border.all(color: tp.border, width: 0.5)),
           child: TextField(controller: ctrl,
+            obscureText: obscure,
+            enableSuggestions: !obscure,
+            autocorrect: !obscure,
             style: TextStyle(color: tp.textPrimary, fontSize: 14),
             decoration: InputDecoration(
               labelText: label, labelStyle: TextStyle(color: tp.textDim, fontSize: 12),

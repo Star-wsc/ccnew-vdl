@@ -151,6 +151,14 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       if (!ok) {
         if (mounted) setState(() => _connected = false);
       } else {
+        // 鉴权开启且未登录：只标在线，不拉业务数据（避免 401 空列表覆盖缓存）
+        final auth = await ApiService.authStatus();
+        final needLogin = auth['auth_mode'] == 'on' &&
+            auth['logged_in'] != true &&
+            (ApiService.authToken == null || ApiService.authToken!.isEmpty);
+        if (needLogin) {
+          if (mounted) setState(() => _connected = true);
+        } else {
         try {
           final results = await Future.wait([
             ApiService.getStats(),
@@ -168,7 +176,15 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           LocalStore.saveTasks(_tasks);
           LocalStore.saveCollections(_collections);
           LocalStore.saveStats(_stats);
-        } catch (_) { if (mounted) setState(() => _connected = false); }
+        } catch (_) {
+          // 401 未登录：服务器在线但未授权，保持本地缓存，绝不用空数据覆盖
+          if (ApiService.lastUnauthorized) {
+            if (mounted) setState(() => _connected = true);
+          } else if (mounted) {
+            setState(() => _connected = false);
+          }
+        }
+        }
       }
     }
     // 日志页内容不受CD约束（切到日志页就是来看日志的）
