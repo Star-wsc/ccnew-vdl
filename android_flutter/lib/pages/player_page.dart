@@ -35,7 +35,8 @@ class _PlayerPageState extends State<PlayerPage> {
           ? p
           : 'file://$p';
     } else {
-      url = '${ApiService.baseUrl}/api/tasks/${widget.taskId}/download';
+      // 必须走带 token 的接口，否则鉴权开启时 401 播不了
+      url = ApiService.downloadUrl(widget.taskId);
     }
     final uri = Uri.parse(url);
     // content:// URI 用 contentUri 方式初始化，其他用 networkUrl
