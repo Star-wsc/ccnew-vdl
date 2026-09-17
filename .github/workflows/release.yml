@@ -19,16 +19,19 @@ jobs:
             goarch: amd64
             ldflags: ""
             ffmpeg_name: "ffmpeg-linux-amd64"
+            ytdlp_name: "yt-dlp-linux-amd64"
             suffix: ""
           - goos: linux
             goarch: arm64
             ldflags: ""
             ffmpeg_name: "ffmpeg-linux-arm64"
+            ytdlp_name: "yt-dlp-linux-arm64"
             suffix: ""
           - goos: windows
             goarch: amd64
             ldflags: "-H=windowsgui"
             ffmpeg_name: "ffmpeg-windows-amd64.exe"
+            ytdlp_name: "yt-dlp-windows-amd64.exe"
             suffix: ".exe"
     steps:
       - uses: actions/checkout@v4
@@ -46,11 +49,12 @@ jobs:
 
       - name: Package
         run: |
-          mkdir -p dist/ccnew-vdl/ffmpeg
+          mkdir -p dist/ccnew-vdl/ffmpeg dist/ccnew-vdl/yt-dlp
           cp server${{ matrix.suffix }} dist/ccnew-vdl/
           cp -r static dist/ccnew-vdl/
           cp -r webview2 dist/ccnew-vdl/
           cp ffmpeg/${{ matrix.ffmpeg_name }} dist/ccnew-vdl/ffmpeg/
+          cp yt-dlp/${{ matrix.ytdlp_name }} dist/ccnew-vdl/yt-dlp/
           cp start-desktop.bat dist/ccnew-vdl/ 2>/dev/null || true
           cp config.json.example dist/ccnew-vdl/ 2>/dev/null || true
           cd dist
@@ -88,6 +92,8 @@ jobs:
           Copy-Item -Recurse ccnew-vdl/webview2 ../build/webview2
           New-Item -ItemType Directory -Path ../build/ffmpeg -Force
           Copy-Item ccnew-vdl/ffmpeg/ffmpeg-windows-amd64.exe ../build/ffmpeg/ffmpeg-windows-amd64.exe
+          New-Item -ItemType Directory -Path ../build/yt-dlp -Force
+          Copy-Item ccnew-vdl/yt-dlp/yt-dlp-windows-amd64.exe ../build/yt-dlp/yt-dlp-windows-amd64.exe
 
       - name: Build Inno Setup installer
         uses: Minionguyjpro/Inno-Setup-Action@v1.2.2

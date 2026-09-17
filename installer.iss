@@ -35,6 +35,7 @@ Source: "build\server.exe"; DestDir: "{app}"; DestName: "{#MyAppExeName}"; Flags
 Source: "build\static\*"; DestDir: "{app}\static"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "build\webview2\*"; DestDir: "{app}\webview2"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "build\ffmpeg\ffmpeg-windows-amd64.exe"; DestDir: "{app}\ffmpeg"; DestName: "ffmpeg.exe"; Flags: ignoreversion
+Source: "build\yt-dlp\yt-dlp-windows-amd64.exe"; DestDir: "{app}\yt-dlp"; Flags: ignoreversion
 
 [Dirs]
 Name: "{app}\config"
@@ -57,6 +58,7 @@ Filename: "taskkill"; Parameters: "/F /IM {#MyAppExeName}"; Flags: runhidden; Ru
 Type: filesandordirs; Name: "{app}\static"
 Type: filesandordirs; Name: "{app}\webview2"
 Type: filesandordirs; Name: "{app}\ffmpeg"
+Type: filesandordirs; Name: "{app}\yt-dlp"
 Type: filesandordirs; Name: "{app}\config"
 Type: files; Name: "{app}\{#MyAppExeName}"
 Type: files; Name: "{app}\*.log"

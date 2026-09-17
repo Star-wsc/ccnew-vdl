@@ -2,6 +2,9 @@
 server.exe
 *.exe
 *.exe~
+# 随仓库分发的 Windows 引擎（与 ffmpeg 同策略，可用性优先）
+!ffmpeg/ffmpeg-windows-amd64.exe
+!yt-dlp/yt-dlp-windows-amd64.exe
 
 # 临时文件
 temp_video_*.m4s
