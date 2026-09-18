@@ -341,14 +341,19 @@ body{
     if (!token) return u;
     return u + (u.indexOf("?")>=0?"&":"?") + "token=" + encodeURIComponent(token);
   }
+  var _onLogin = false;
+
   async function api(path, opt){
     var o = Object.assign({}, opt||{});
     o.headers = hdrs(o.headers);
     var r = await fetch(path, o);
     if (r.status === 401) {
       var j = null; try { j = await r.json(); } catch(e) {}
-      if (j && j.need_setup) { showView("login"); document.getElementById("loginHint").textContent = "请先用浏览器打开服务器地址完成初始化"; }
-      else { token=""; try{localStorage.removeItem("doubi_token")}catch(e){}; showView("login"); }
+      if (j && j.need_setup) { _onLogin = true; showView("login"); document.getElementById("loginHint").textContent = "请先用浏览器打开服务器地址完成初始化"; }
+      else {
+        token=""; try{localStorage.removeItem("doubi_token")}catch(e){};
+        _onLogin = true; showView("login");
+      }
       throw new Error("unauthorized");
     }
     var j = null; try { j = await r.json(); } catch(e) {}
@@ -362,6 +367,7 @@ body{
     document.querySelectorAll(".rail-btn").forEach(function(b){
       b.classList.toggle("on", b.getAttribute("data-v")===name);
     });
+    _onLogin = (name === "login");
   }
   function platOf(t){
     var p = (t.platform||"").toString();
@@ -586,7 +592,10 @@ body{
   };
 
   loadAll();
-  setInterval(function(){ refreshTasks().catch(function(){}); }, 4000);
+  setInterval(function(){
+    if (_onLogin) return; // 未登录时不要反复打 API / 触发视图切换
+    refreshTasks().catch(function(){});
+  }, 4000);
 })();
 </script>
 </body>

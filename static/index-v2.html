@@ -391,7 +391,19 @@ function authHdrs(extra){
   if(t)h["Authorization"]="Bearer "+t;
   return h;
 }
-function goLogin(){try{localStorage.removeItem("doubi_token")}catch(e){}location.replace("/");}
+function goLogin(){
+  try{localStorage.removeItem("doubi_token")}catch(e){}
+  // 防止：旧页缓存 + 反复 replace('/') 打回旧壳，形成疯狂刷新
+  try{
+    if(sessionStorage.getItem("doubi_login_jump")==="1"){
+      sessionStorage.removeItem("doubi_login_jump");
+      return; // 已经跳过一次，停在当前页等用户手动刷新
+    }
+    sessionStorage.setItem("doubi_login_jump","1");
+  }catch(e){}
+  const t=Date.now();
+  location.replace("/login?t="+t);
+}
 
 async function api(p,o){
   const opt=Object.assign({},o||{});
@@ -400,6 +412,8 @@ async function api(p,o){
   if(r.status===401){goLogin();throw new Error("未登录")}
   let j=null;try{j=await r.json()}catch(e){}
   if(!r.ok){throw new Error((j&&(j.detail||j.error))||("HTTP "+r.status))}
+  // 登录成功后清除防循环标记
+  try{sessionStorage.removeItem("doubi_login_jump")}catch(e){}
   return j;
 }
 
@@ -437,7 +451,7 @@ async function changePassword(){
     })});
     toast(r.message||"密码已修改，请重新登录");
     try{localStorage.removeItem("doubi_token")}catch(e){}
-    setTimeout(()=>location.replace("/"),1200);
+    setTimeout(()=>location.replace("/login?t="+Date.now()),1200);
   }catch(e){toast(e.message||"修改失败","err")}
 }
 async function loadDevices(){

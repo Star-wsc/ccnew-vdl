@@ -66,11 +66,11 @@ button:disabled { opacity: .55; cursor: not-allowed; }
   function goApp(token) {
     sessionStorage.removeItem(bounceKey);
     try { if (token) localStorage.setItem('doubi_token', token); } catch (e) {}
-    // 带 token 跳转：中间件认 query token，不依赖 Set-Cookie 是否已生效
+    // 带 token + 时间戳，避免旧缓存壳
     if (token) {
-      location.replace('/?token=' + encodeURIComponent(token));
+      location.replace('/?token=' + encodeURIComponent(token) + '&t=' + Date.now());
     } else {
-      location.replace('/');
+      location.replace('/?t=' + Date.now());
     }
   }
 

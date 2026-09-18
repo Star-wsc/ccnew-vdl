@@ -179,6 +179,7 @@ func main() {
 
 	// 所有 API 路由
 	r.GET("/", func(c *gin.Context) {
+		c.Header("Cache-Control", "no-store, no-cache, must-revalidate")
 		// 鉴权开启且未登录/未初始化时，先出登录页，避免白屏调 API 401
 		if gate.enabled() && !gate.allow(c) {
 			exePath, _ := os.Executable()
@@ -191,6 +192,7 @@ func main() {
 		h.Index(c)
 	})
 	r.GET("/desktop", h.DesktopWin)
+	r.GET("/login", h.Login)
 	r.GET("/api/config", h.GetConfig)
 	r.POST("/api/browse-folder", h.BrowseFolder)
 	r.POST("/api/download-dir", h.SetDownloadDir)

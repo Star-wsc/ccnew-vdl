@@ -180,39 +180,52 @@ func (h *Handlers) loadOperationLogs() {
 
 // ==================== Index ====================
 
-func (h *Handlers) Index(c *gin.Context) {
+func (h *Handlers) staticDir() string {
 	exePath, _ := os.Executable()
 	exeDir := filepath.Dir(exePath)
 	staticDir := os.Getenv("STATIC_DIR")
 	if staticDir == "" {
-		staticDir = filepath.Join(exeDir, "static")
-	} else {
-		staticDir = filepath.Join(staticDir, "static")
+		return filepath.Join(exeDir, "static")
 	}
+	return filepath.Join(staticDir, "static")
+}
+
+func (h *Handlers) serveStaticHTML(c *gin.Context, name string) {
+	// 禁止缓存：会话失效后 location.replace('/') 否则会打到旧壳，形成疯狂刷新
+	c.Header("Cache-Control", "no-store, no-cache, must-revalidate")
+	c.Header("Pragma", "no-cache")
+	p := filepath.Join(h.staticDir(), name)
+	if _, err := os.Stat(p); err != nil {
+		c.String(http.StatusNotFound, "not found")
+		return
+	}
+	c.File(p)
+}
+
+// Login 登录/初始化页（独立 URL，避免与首页缓存混用）
+func (h *Handlers) Login(c *gin.Context) {
+	h.serveStaticHTML(c, "login.html")
+}
+
+func (h *Handlers) Index(c *gin.Context) {
+	c.Header("Cache-Control", "no-store, no-cache, must-revalidate")
+	c.Header("Pragma", "no-cache")
 	// Windows 桌面壳使用专用页；网页/Web 仍走 index-v2
 	if c.Query("ui") == "desktop" || strings.HasPrefix(c.Request.URL.Path, "/desktop") {
-		p := filepath.Join(staticDir, "desktop-win.html")
+		p := filepath.Join(h.staticDir(), "desktop-win.html")
 		if _, err := os.Stat(p); err == nil {
 			c.File(p)
 			return
 		}
 	}
-	c.File(filepath.Join(staticDir, "index-v2.html"))
+	c.File(filepath.Join(h.staticDir(), "index-v2.html"))
 }
 
 // DesktopWin Windows 独立桌面 UI（首页英雄卡 + 下载列表流）
 func (h *Handlers) DesktopWin(c *gin.Context) {
-	exePath, _ := os.Executable()
-	exeDir := filepath.Dir(exePath)
-	staticDir := os.Getenv("STATIC_DIR")
-	if staticDir == "" {
-		staticDir = filepath.Join(exeDir, "static")
-	} else {
-		staticDir = filepath.Join(staticDir, "static")
-	}
-	p := filepath.Join(staticDir, "desktop-win.html")
+	c.Header("Cache-Control", "no-store, no-cache, must-revalidate")
+	p := filepath.Join(h.staticDir(), "desktop-win.html")
 	if _, err := os.Stat(p); err != nil {
-		// 回退到通用控制台
 		h.Index(c)
 		return
 	}
