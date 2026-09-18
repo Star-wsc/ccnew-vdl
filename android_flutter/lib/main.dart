@@ -68,7 +68,7 @@ class DouBiApp extends StatelessWidget {
         await ApiService.getTasks();
         return (route: _StartRoute.home, needSetup: false);
       } catch (_) {
-        await ApiService.setToken(null);
+        await ApiService.logout();
       }
     }
     if (auth['need_setup'] == true) {

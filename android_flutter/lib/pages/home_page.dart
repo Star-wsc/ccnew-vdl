@@ -280,7 +280,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   void _gotoLoginOnce() {
     if (_wentLogin || !mounted) return;
     _wentLogin = true;
-    ApiService.setToken(null);
+    // 异步清理本地 token；导航不等待
+    ApiService.logout();
     Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute(builder: (_) => const LoginPage()),
       (route) => false,
