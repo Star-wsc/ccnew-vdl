@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>DouBi Desktop</title>
+<style>
+:root{
+  --void:#07080C; --deep:#0B0E14; --raise:#121620; --raise2:#181D2A; --raise3:#1F2535;
+  --hair:rgba(255,255,255,.065); --hair2:rgba(255,255,255,.11);
+  --ink:#F3F7FB; --ink2:#A9B3C6; --ink3:#6F7A8E; --ink4:#4C5568;
+  --volt:#7CFFCB; --volt-d:rgba(124,255,203,.12);
+  --sky:#7AA2FF; --sky-d:rgba(122,162,255,.12);
+  --ok:#5CE1A8; --err:#FF7B8A; --warn:#F0C674;
+  --r:22px; --r2:16px; --r3:12px;
+  --font:"Segoe UI Variable Display","Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+  --ui:"Segoe UI Variable Text","Segoe UI","PingFang SC",system-ui,sans-serif;
+  --mono:"Cascadia Code","JetBrains Mono",ui-monospace,Consolas,monospace;
+  --title-h:40px;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%;overflow:hidden}
+body{
+  font-family:var(--ui);color:var(--ink);background:var(--void);
+  background:
+    radial-gradient(900px 500px at 15% 0%, rgba(122,162,255,.1), transparent 55%),
+    radial-gradient(700px 400px at 85% 10%, rgba(124,255,203,.06), transparent 50%),
+    var(--void);
+  -webkit-font-smoothing:antialiased;
+}
+/* ── 自定义标题栏（拖拽区） ── */
+.titlebar{
+  height:var(--title-h);display:flex;align-items:center;gap:10px;
+  padding:0 8px 0 14px;
+  -webkit-app-region:drag;
+  background:rgba(10,12,18,.75);
+  border-bottom:1px solid var(--hair);
+  user-select:none;
+}
+.titlebar .brand{
+  display:flex;align-items:center;gap:8px;font-family:var(--font);
+  font-size:12.5px;font-weight:650;letter-spacing:.02em;color:var(--ink2);
+}
+.titlebar .brand i{
+  width:18px;height:18px;border-radius:6px;display:grid;place-items:center;
+  background:linear-gradient(140deg,var(--volt),var(--sky));
+  color:#06100C;font-style:normal;font-size:10px;font-weight:800;
+}
+.titlebar .sp{flex:1}
+.win-btn{
+  -webkit-app-region:no-drag;
+  width:40px;height:28px;border:0;border-radius:8px;background:transparent;
+  color:var(--ink3);cursor:pointer;display:grid;place-items:center;font-size:14px;
+}
+.win-btn:hover{background:rgba(255,255,255,.06);color:var(--ink)}
+.win-btn.close:hover{background:rgba(255,80,100,.25);color:#fff}
+.win-btn:focus-visible{outline:2px solid var(--volt);outline-offset:1px}
+
+.shell{
+  height:calc(100% - var(--title-h));
+  max-width:1400px;margin:0 auto;padding:14px 16px 16px;
+  display:grid;grid-template-columns:68px minmax(0,1fr);gap:14px;
+}
+.rail{
+  display:flex;flex-direction:column;align-items:center;padding:12px 0 10px;
+  background:rgba(18,22,32,.72);border:1px solid var(--hair);border-radius:26px;
+  backdrop-filter:blur(18px);
+}
+.rail-btn{
+  width:46px;height:46px;margin:3px 0;border:0;border-radius:14px;background:transparent;
+  color:var(--ink4);cursor:pointer;display:grid;place-items:center;
+}
+.rail-btn svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.rail-btn.on{color:var(--volt);background:var(--volt-d)}
+.rail-btn:hover{color:var(--ink2)}
+.rail-btn:focus-visible{outline:2px solid var(--volt);outline-offset:2px}
+
+.stage{
+  min-width:0;display:flex;flex-direction:column;gap:12px;min-height:0;
+  background:linear-gradient(180deg,rgba(18,22,32,.9),rgba(11,14,20,.92));
+  border:1px solid var(--hair);border-radius:26px;padding:18px 18px 12px;
+  box-shadow:0 20px 50px rgba(0,0,0,.4);overflow:hidden;
+}
+.view{display:none;flex-direction:column;gap:12px;min-height:0;flex:1}
+.view.on{display:flex}
+
+/* 指令条 */
+.composer{
+  display:flex;align-items:center;gap:8px;padding:5px 5px 5px 14px;
+  border-radius:18px;border:1px solid var(--hair2);
+  background:linear-gradient(180deg,rgba(31,37,53,.95),rgba(18,22,32,.85));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.04);
+}
+.composer input{
+  flex:1;min-width:0;background:transparent;border:0;outline:0;color:var(--ink);
+  font-family:var(--ui);font-size:14.5px;padding:10px 2px;
+}
+.composer input::placeholder{color:var(--ink4)}
+.qual{display:flex;gap:2px;padding:3px;border-radius:99px;background:rgba(0,0,0,.3);border:1px solid var(--hair)}
+.qual button{
+  border:0;background:transparent;color:var(--ink3);font-family:inherit;font-size:12px;
+  font-weight:600;height:28px;padding:0 11px;border-radius:99px;cursor:pointer;
+}
+.qual button.on{background:rgba(255,255,255,.08);color:var(--ink)}
+.act{
+  height:40px;padding:0 18px;border:0;border-radius:12px;font-family:inherit;font-weight:700;
+  font-size:13px;color:#06100C;background:linear-gradient(135deg,var(--volt),#5ee0b8);
+  cursor:pointer;box-shadow:0 4px 14px rgba(124,255,203,.22);
+}
+.act:active{transform:scale(.98)}
+.act:focus-visible{outline:2px solid #fff;outline-offset:2px}
+
+/* 首页 B：英雄卡 + 快捷指标 + 最近 */
+.hero{
+  border-radius:var(--r);border:1px solid var(--hair);overflow:hidden;position:relative;
+  min-height:150px;background:#1a2233;
+}
+.hero .bg{position:absolute;inset:0;background:linear-gradient(145deg,#3d5a9e,#1a2744)}
+.hero .shade{position:absolute;inset:0;background:linear-gradient(180deg,rgba(7,8,12,.15),rgba(7,8,12,.78))}
+.hero .body{position:relative;padding:16px 18px;display:flex;flex-direction:column;min-height:150px}
+.hero .lab{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:rgba(255,255,255,.55);font-weight:700}
+.hero .t{
+  margin-top:auto;font-family:var(--font);font-size:16px;font-weight:700;letter-spacing:-.02em;
+  line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+}
+.hero .meta{margin-top:10px;display:flex;align-items:center;gap:10px;font-family:var(--mono);font-size:11.5px;color:rgba(255,255,255,.72)}
+.hero .meta .bar{flex:1;height:3px;border-radius:99px;background:rgba(255,255,255,.15);overflow:hidden;max-width:360px}
+.hero .meta .bar i{display:block;height:100%;width:0;background:#fff;border-radius:99px;transition:width .5s}
+.hero-empty{
+  border-radius:var(--r);border:1px dashed var(--hair2);min-height:120px;
+  display:grid;place-items:center;color:var(--ink3);font-size:13px;background:rgba(255,255,255,.02);
+}
+
+.metrics{display:flex;border-top:1px solid var(--hair);border-bottom:1px solid var(--hair)}
+.m{flex:1;padding:12px 8px;border-right:1px solid var(--hair);display:flex;flex-direction:column;gap:4px}
+.m:last-child{border-right:0}
+.m .l{font-size:10.5px;color:var(--ink4);letter-spacing:.08em;text-transform:uppercase;font-weight:600}
+.m .n{font-family:var(--font);font-size:20px;font-weight:700;letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+.m .n span{font-size:11px;color:var(--ink3);margin-left:2px;font-weight:600}
+.m.volt .n{color:var(--volt)} .m.ok .n{color:var(--ok)} .m.err .n{color:var(--err)}
+
+.list-head{display:flex;align-items:center;gap:8px;padding:0 2px}
+.list-head h2{font-size:13px;font-weight:650;color:var(--ink2)}
+.list-head .n{font-family:var(--mono);font-size:11px;color:var(--ink4);background:rgba(255,255,255,.04);padding:2px 7px;border-radius:6px}
+.list-head .sp{flex:1}
+.filters{display:flex;gap:2px}
+.filters button{
+  border:0;background:transparent;color:var(--ink4);font-family:inherit;font-size:12px;
+  font-weight:600;height:26px;padding:0 10px;border-radius:8px;cursor:pointer;
+}
+.filters button.on{color:var(--ink);background:rgba(255,255,255,.06)}
+
+.stream{flex:1;min-height:0;overflow:auto;margin:0 -4px;padding:0 4px 6px;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.1) transparent}
+.row{
+  display:grid;grid-template-columns:52px minmax(0,1fr) auto;gap:12px;align-items:center;
+  padding:10px 8px;border-radius:var(--r2);border:1px solid transparent;
+}
+.row:hover{background:rgba(255,255,255,.03);border-color:var(--hair)}
+.thumb{width:52px;height:52px;border-radius:var(--r3);background:#243044;box-shadow:0 0 0 1px rgba(255,255,255,.06);background-size:cover;background-position:center;position:relative}
+.thumb::after{content:attr(data-p);position:absolute;left:4px;top:4px;font-size:9px;font-weight:800;padding:1px 5px;border-radius:4px;background:rgba(0,0,0,.55);color:#fff}
+.row-title{font-size:13px;font-weight:600;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row-sub{margin-top:3px;display:flex;gap:8px;align-items:center;font-size:11px;color:var(--ink3)}
+.st{font-size:10px;font-weight:700;padding:2px 6px;border-radius:6px}
+.st.run{background:var(--sky-d);color:var(--sky)} .st.ok{background:var(--volt-d);color:var(--volt)}
+.st.fail{background:rgba(255,123,138,.12);color:var(--err)} .st.wait{background:rgba(240,198,116,.1);color:var(--warn)}
+.track{margin-top:6px;height:3px;border-radius:99px;background:rgba(255,255,255,.05);overflow:hidden;max-width:400px}
+.track i{display:block;height:100%;background:linear-gradient(90deg,var(--sky),var(--volt));border-radius:99px}
+.track.done i{background:var(--ok)} .track.fail i{background:var(--err)}
+.pct{font-family:var(--mono);font-size:11.5px;color:var(--ink2);min-width:42px;text-align:right}
+
+.page-title{font-family:var(--font);font-size:18px;font-weight:700;letter-spacing:-.02em}
+.empty{color:var(--ink3);font-size:13px;padding:24px;text-align:center}
+
+/* 设置/其它简单块 */
+.card{
+  background:rgba(255,255,255,.03);border:1px solid var(--hair);border-radius:var(--r2);padding:14px 16px;
+}
+.card h3{font-size:12px;color:var(--ink3);margin-bottom:8px;font-weight:650}
+.kv{display:flex;flex-direction:column;gap:8px}
+.kv-row{display:flex;justify-content:space-between;font-size:12.5px;gap:12px}
+.kv-row .k{color:var(--ink3)} .kv-row .v{font-family:var(--mono);color:var(--ink2)}
+.status-pill{
+  display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 12px;border-radius:99px;
+  background:var(--volt-d);color:var(--volt);font-size:12px;font-weight:600;
+}
+.status-pill i{width:6px;height:6px;border-radius:50%;background:var(--volt)}
+.status-pill.off{background:rgba(255,123,138,.12);color:var(--err)}
+.status-pill.off i{background:var(--err)}
+
+.login-box{max-width:360px;margin:40px auto;display:flex;flex-direction:column;gap:10px}
+.login-box input{
+  height:42px;border-radius:12px;border:1px solid var(--hair2);background:rgba(0,0,0,.25);
+  color:var(--ink);padding:0 14px;font-family:var(--ui);font-size:14px;outline:0;
+}
+.login-box input:focus{border-color:var(--volt)}
+.login-box button{height:42px;border:0;border-radius:12px;background:var(--volt);color:#06100C;font-weight:700;font-family:inherit;cursor:pointer}
+.hint{font-size:12px;color:var(--ink3);line-height:1.5;text-align:center}
+
+@media (max-width:900px){
+  .shell{grid-template-columns:1fr;padding:10px}
+  .rail{flex-direction:row;border-radius:18px;justify-content:space-around;padding:6px}
+  .qual{display:none}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<header class="titlebar">
+  <div class="brand"><i>C</i>DouBi Desktop</div>
+  <div class="sp"></div>
+  <span class="status-pill off" id="authPill" title="登录状态"><i></i><span id="authTxt">检查中</span></span>
+  <button class="win-btn" type="button" id="btnMin" title="最小化">—</button>
+  <button class="win-btn" type="button" id="btnMax" title="最大化">▢</button>
+  <button class="win-btn close" type="button" id="btnClose" title="关闭">✕</button>
+</header>
+
+<div class="shell">
+  <nav class="rail" aria-label="导航">
+    <button class="rail-btn on" data-v="home" type="button" title="首页">
+      <svg viewBox="0 0 24 24"><path d="M4 10.5L12 4l8 6.5V20a1 1 0 01-1 1h-5v-6H10v6H5a1 1 0 01-1-1v-9.5z"/></svg>
+    </button>
+    <button class="rail-btn" data-v="tasks" type="button" title="下载">
+      <svg viewBox="0 0 24 24"><path d="M12 4v12"/><path d="M7 11l5 5 5-5"/><path d="M5 20h14"/></svg>
+    </button>
+    <button class="rail-btn" data-v="cols" type="button" title="合集">
+      <svg viewBox="0 0 24 24"><path d="M4 6h16v3H4zM4 11h16v3H4zM4 16h10v3H4z"/></svg>
+    </button>
+    <button class="rail-btn" data-v="logs" type="button" title="日志">
+      <svg viewBox="0 0 24 24"><path d="M5 5h14v14H5z"/><path d="M8 9h8M8 12h8M8 15h5"/></svg>
+    </button>
+    <button class="rail-btn" data-v="set" type="button" title="设置">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v1.5M12 19.5V21M3 12h1.5M19.5 12H21"/></svg>
+    </button>
+  </nav>
+
+  <main class="stage">
+    <!-- 登录 -->
+    <div class="view" id="v-login">
+      <div class="login-box">
+        <div class="page-title">登录 DouBi</div>
+        <div class="hint" id="loginHint">桌面版请使用服务器账号登录</div>
+        <input id="lu" placeholder="用户名" autocomplete="username" />
+        <input id="lp" type="password" placeholder="密码" autocomplete="current-password" />
+        <button type="button" id="loginBtn">登录</button>
+      </div>
+    </div>
+
+    <!-- 首页 B -->
+    <div class="view on" id="v-home">
+      <div class="composer">
+        <input id="urlIn" placeholder="粘贴 B站 / 抖音 / YouTube 链接…" />
+        <div class="qual">
+          <button type="button" class="on" data-q="4k">自动</button>
+          <button type="button" data-q="4k">4K</button>
+          <button type="button" data-q="1080p">1080P</button>
+        </div>
+        <button class="act" type="button" id="goBtn">解析</button>
+      </div>
+      <div class="hero" id="hero"><div class="bg"></div><div class="shade"></div>
+        <div class="body"><div class="lab">Now capturing</div><div class="t" id="heroT">—</div>
+          <div class="meta"><span id="heroPct">—</span><span class="bar"><i id="heroBar"></i></span><span id="heroSpd"></span></div>
+        </div>
+      </div>
+      <div class="metrics">
+        <div class="m volt"><div class="l">进行中</div><div class="n" id="mRun">0</div></div>
+        <div class="m ok"><div class="l">已完成</div><div class="n" id="mOk">0</div></div>
+        <div class="m err"><div class="l">失败</div><div class="n" id="mFail">0</div></div>
+        <div class="m"><div class="l">速度</div><div class="n" id="mSpd">—<span>MB/s</span></div></div>
+      </div>
+      <div class="list-head"><h2>最近</h2><span class="n" id="recentN">0</span><span class="sp"></span>
+        <button type="button" class="filters on" data-goto="tasks" style="color:var(--volt);background:transparent;border:0;font-family:inherit;font-size:12px;cursor:pointer;font-weight:600">全部下载 →</button>
+      </div>
+      <div class="stream" id="recentList"></div>
+    </div>
+
+    <!-- 下载 A -->
+    <div class="view" id="v-tasks">
+      <div class="list-head">
+        <div class="page-title">下载</div>
+        <span class="n" id="taskN">0</span>
+        <span class="sp"></span>
+        <div class="filters" id="taskF">
+          <button type="button" class="on" data-f="">全部</button>
+          <button type="button" data-f="downloading">进行中</button>
+          <button type="button" data-f="completed">已完成</button>
+          <button type="button" data-f="failed">失败</button>
+        </div>
+      </div>
+      <div class="stream" id="taskList"></div>
+    </div>
+
+    <div class="view" id="v-cols">
+      <div class="page-title">合集</div>
+      <div class="stream" id="colList"><div class="empty">加载中…</div></div>
+    </div>
+    <div class="view" id="v-logs">
+      <div class="page-title">日志</div>
+      <div class="stream" id="logList"><div class="empty">加载中…</div></div>
+    </div>
+    <div class="view" id="v-set">
+      <div class="page-title">设置</div>
+      <div class="card"><h3>服务器</h3><div class="kv">
+        <div class="kv-row"><span class="k">版本</span><span class="v" id="sVer">—</span></div>
+        <div class="kv-row"><span class="k">下载目录</span><span class="v" id="sDir">—</span></div>
+        <div class="kv-row"><span class="k">账号</span><span class="v" id="sUser">—</span></div>
+      </div></div>
+      <div class="card"><h3>说明</h3>
+        <div class="hint" style="text-align:left">这是 Windows 专用界面：首页为英雄卡片，下载页为列表流。网页版仍使用原控制台，互不影响。</div>
+      </div>
+      <div class="card"><button class="act" type="button" id="logoutBtn" style="width:100%">退出登录</button></div>
+    </div>
+  </main>
+</div>
+
+<script>
+(function(){
+  var token = "";
+  try {
+    var q = new URLSearchParams(location.search);
+    if (q.get("token")) { localStorage.setItem("doubi_token", q.get("token")); history.replaceState(null,"","/desktop"); }
+    token = localStorage.getItem("doubi_token") || "";
+  } catch(e) {}
+  var quality = "4k";
+  var taskFilter = "";
+
+  function winMsg(cmd){
+    try {
+      if (window.chrome && window.chrome.webview) window.chrome.webview.postMessage(JSON.stringify({cmd:cmd}));
+    } catch(e) {}
+  }
+  document.getElementById("btnMin").onclick = function(){ winMsg("min") };
+  document.getElementById("btnMax").onclick = function(){ winMsg("max") };
+  document.getElementById("btnClose").onclick = function(){ winMsg("close") };
+
+  function hdrs(extra){
+    var h = Object.assign({"Content-Type":"application/json"}, extra||{});
+    if (token) h["Authorization"] = "Bearer " + token;
+    return h;
+  }
+  function withTok(u){
+    if (!token) return u;
+    return u + (u.indexOf("?")>=0?"&":"?") + "token=" + encodeURIComponent(token);
+  }
+  async function api(path, opt){
+    var o = Object.assign({}, opt||{});
+    o.headers = hdrs(o.headers);
+    var r = await fetch(path, o);
+    if (r.status === 401) {
+      var j = null; try { j = await r.json(); } catch(e) {}
+      if (j && j.need_setup) { showView("login"); document.getElementById("loginHint").textContent = "请先用浏览器打开服务器地址完成初始化"; }
+      else { token=""; try{localStorage.removeItem("doubi_token")}catch(e){}; showView("login"); }
+      throw new Error("unauthorized");
+    }
+    var j = null; try { j = await r.json(); } catch(e) {}
+    if (!r.ok) throw new Error((j && (j.error||j.detail)) || ("HTTP "+r.status));
+    return j;
+  }
+  function showView(name){
+    document.querySelectorAll(".view").forEach(function(v){ v.classList.remove("on") });
+    var el = document.getElementById("v-"+name);
+    if (el) el.classList.add("on");
+    document.querySelectorAll(".rail-btn").forEach(function(b){
+      b.classList.toggle("on", b.getAttribute("data-v")===name);
+    });
+  }
+  function platOf(t){
+    var p = (t.platform||"").toString();
+    if (p==="bilibili") return "B";
+    if (p==="douyin") return "D";
+    if (p==="youtube") return "YT";
+    return "?";
+  }
+  function stateOf(s){
+    s = (s||"").toString();
+    if (s==="completed") return ["ok","已完成"];
+    if (s==="downloading"||s==="parsing") return ["run", s==="parsing"?"解析中":"下载中"];
+    if (s==="failed") return ["fail","失败"];
+    return ["wait","待命"];
+  }
+  function rowHTML(t){
+    var L = stateOf(t.status);
+    var pct = t.progress||0;
+    var cover = t.cover_url ? 'style="background-image:url(\''+String(t.cover_url).replace(/'/g,"")+'\')"' : "";
+    var track = t.status==="completed" ? "done" : t.status==="failed" ? "fail" : "";
+    return '<div class="row">'+
+      '<div class="thumb" data-p="'+platOf(t)+'" '+cover+'></div>'+
+      '<div style="min-width:0">'+
+        '<div class="row-title">'+esc(t.title||t.url||"")+'</div>'+
+        '<div class="row-sub"><span class="st '+L[0]+'">'+L[1]+'</span>'+
+          (t.speed? '<span style="font-family:var(--mono)">'+fmtSpd(t.speed)+'</span>':'')+
+        '</div>'+
+        '<div class="track '+track+'"><i style="width:'+pct+'%"></i></div>'+
+      '</div>'+
+      '<div class="pct">'+(t.status==="completed"?"100%":pct+"%")+'</div>'+
+    '</div>';
+  }
+  function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]})}
+  function fmtSpd(b){
+    b = Number(b)||0; if (b<=0) return "0 B/s";
+    var u=["B/s","KB/s","MB/s","GB/s"],i=0; while(b>=1024&&i<3){b/=1024;i++}
+    return b.toFixed(b>=100?0:1)+" "+u[i];
+  }
+  function setAuthPill(ok, user){
+    var p = document.getElementById("authPill");
+    p.classList.toggle("off", !ok);
+    document.getElementById("authTxt").textContent = ok ? (user||"已登录") : "未登录";
+  }
+
+  async function loadAll(){
+    var st = await fetch("/api/auth/status").then(function(r){return r.json()}).catch(function(){return {}});
+    if (st.auth_mode === "off") {
+      token = token || "desktop-off";
+      setAuthPill(true, "本机模式");
+      showView("home");
+    } else if (!st.logged_in && !(token && st.logged_in!==false && await tryToken())) {
+      var need = st.need_setup;
+      document.getElementById("loginHint").textContent = need
+        ? "服务器尚未初始化，请先用浏览器打开服务器地址设置密码"
+        : "桌面版请使用服务器账号登录";
+      setAuthPill(false, need?"未初始化":"未登录");
+      showView("login");
+      return;
+    } else {
+      setAuthPill(true, st.username || "已登录");
+    }
+    await Promise.all([refreshTasks(), refreshCols(), refreshLogs(), refreshSet()]);
+    showView(document.querySelector(".rail-btn.on") ? document.querySelector(".rail-btn.on").getAttribute("data-v") : "home");
+  }
+  async function tryToken(){
+    if (!token) return false;
+    try {
+      var s = await fetch("/api/auth/status", {headers:hdrs()}).then(function(r){return r.json()});
+      return !!s.logged_in;
+    } catch(e){ return false; }
+  }
+
+  async function refreshTasks(){
+    var list = await api("/api/tasks?source=" + encodeURIComponent(""));
+    if (!Array.isArray(list)) list = [];
+    var run = list.filter(function(t){return t.status==="downloading"||t.status==="parsing"});
+    var ok = list.filter(function(t){return t.status==="completed"});
+    var fail = list.filter(function(t){return t.status==="failed"});
+    document.getElementById("mRun").textContent = String(run.length);
+    document.getElementById("mOk").textContent = String(ok.length);
+    document.getElementById("mFail").textContent = String(fail.length);
+    var spd = 0; run.forEach(function(t){ spd += Number(t.speed)||0 });
+    document.getElementById("mSpd").innerHTML = (run.length? (spd/1048576).toFixed(1) : "—") + '<span>MB/s</span>';
+
+    var hero = document.getElementById("hero");
+    var hT = document.getElementById("heroT");
+    var hP = document.getElementById("heroPct");
+    var hB = document.getElementById("heroBar");
+    var hS = document.getElementById("heroSpd");
+    var hBg = hero.querySelector(".bg");
+    if (run[0]) {
+      var t = run[0];
+      hero.style.display = "";
+      hT.textContent = t.title || t.url || "—";
+      hP.textContent = (t.progress||0) + "%";
+      hB.style.width = (t.progress||0) + "%";
+      hS.textContent = fmtSpd(t.speed);
+      if (t.cover_url) hBg.style.background = 'linear-gradient(160deg,rgba(0,0,0,.2),rgba(7,8,12,.25)), url("'+t.cover_url+'") center/cover';
+      else hBg.style.background = "linear-gradient(145deg,#3d5a9e,#1a2744)";
+    } else {
+      hT.textContent = "当前没有进行中的任务";
+      hP.textContent = "—"; hB.style.width = "0%"; hS.textContent = "";
+      hBg.style.background = "linear-gradient(145deg,#243044,#151a24)";
+    }
+
+    var recent = list.slice(0, 5);
+    document.getElementById("recentN").textContent = String(recent.length);
+    document.getElementById("recentList").innerHTML = recent.length
+      ? recent.map(rowHTML).join("") : '<div class="empty">粘贴链接开始捕获</div>';
+
+    var filtered = list;
+    if (taskFilter) filtered = list.filter(function(t){ return t.status===taskFilter });
+    document.getElementById("taskN").textContent = String(filtered.length);
+    document.getElementById("taskList").innerHTML = filtered.length
+      ? filtered.map(rowHTML).join("") : '<div class="empty">没有任务</div>';
+  }
+  async function refreshCols(){
+    try {
+      var list = await api("/api/collections");
+      if (!Array.isArray(list) || !list.length) {
+        document.getElementById("colList").innerHTML = '<div class="empty">暂无合集</div>'; return;
+      }
+      document.getElementById("colList").innerHTML = list.map(function(c){
+        return '<div class="row" style="grid-template-columns:52px 1fr auto">'+
+          '<div class="thumb" data-p="C"></div>'+
+          '<div style="min-width:0"><div class="row-title">'+esc(c.title||c.id)+'</div>'+
+          '<div class="row-sub"><span class="st '+(c.status==="completed"?"ok":c.status==="downloading"?"run":"wait")+'">'+esc(c.status||"")+'</span></div></div>'+
+          '<div class="pct">'+(c.total_count||c.total||"")+'</div></div>';
+      }).join("");
+    } catch(e) {
+      document.getElementById("colList").innerHTML = '<div class="empty">'+esc(e.message||"加载失败")+'</div>';
+    }
+  }
+  async function refreshLogs(){
+    try {
+      var logs = await api("/api/logs");
+      if (!Array.isArray(logs) || !logs.length) {
+        document.getElementById("logList").innerHTML = '<div class="empty">暂无日志</div>'; return;
+      }
+      document.getElementById("logList").innerHTML = logs.slice(-80).reverse().map(function(l){
+        return '<div style="font-family:var(--mono);font-size:11.5px;color:var(--ink3);padding:6px 4px;border-bottom:1px solid var(--hair)">'+
+          esc(l.timestamp||"")+' ['+esc(l.level||"")+'] '+esc(l.message||"")+'</div>';
+      }).join("");
+    } catch(e) {
+      document.getElementById("logList").innerHTML = '<div class="empty">'+esc(e.message||"加载失败")+'</div>';
+    }
+  }
+  async function refreshSet(){
+    try {
+      var c = await api("/api/config");
+      document.getElementById("sVer").textContent = c.version||"—";
+      document.getElementById("sDir").textContent = c.download_dir||"—";
+    } catch(e) {}
+    try {
+      var s = await fetch("/api/auth/status").then(function(r){return r.json()});
+      document.getElementById("sUser").textContent = s.username || (s.auth_mode==="off"?"本机":"—");
+    } catch(e) {}
+  }
+
+  async function submit(){
+    var v = document.getElementById("urlIn").value.trim();
+    if (!v) return;
+    try {
+      await api("/api/tasks", {method:"POST", body: JSON.stringify({url:v, quality:quality, source:"desktop"})});
+      document.getElementById("urlIn").value = "";
+      await refreshTasks();
+    } catch(e) {
+      if (String(e.message||"").indexOf("unauthorized")<0) alert(e.message||"创建失败");
+    }
+  }
+  document.getElementById("goBtn").onclick = submit;
+  document.getElementById("urlIn").addEventListener("keydown", function(e){
+    if (e.key === "Enter") submit();
+  });
+  document.querySelectorAll(".qual button").forEach(function(b){
+    b.onclick = function(){
+      document.querySelectorAll(".qual button").forEach(function(x){x.classList.remove("on")});
+      b.classList.add("on");
+      quality = b.getAttribute("data-q")||"4k";
+    };
+  });
+  document.querySelectorAll(".rail-btn").forEach(function(b){
+    b.onclick = function(){ showView(b.getAttribute("data-v")); };
+  });
+  document.querySelectorAll("[data-goto]").forEach(function(b){
+    b.onclick = function(){ showView(b.getAttribute("data-goto")); };
+  });
+  document.querySelectorAll("#taskF button").forEach(function(b){
+    b.onclick = function(){
+      document.querySelectorAll("#taskF button").forEach(function(x){x.classList.remove("on")});
+      b.classList.add("on");
+      taskFilter = b.getAttribute("data-f")||"";
+      refreshTasks();
+    };
+  });
+  document.getElementById("loginBtn").onclick = async function(){
+    var u = document.getElementById("lu").value.trim();
+    var p = document.getElementById("lp").value;
+    if (!u || !p) return;
+    try {
+      var r = await fetch("/api/auth/login", {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        credentials:"same-origin",
+        body: JSON.stringify({username:u, password:p})
+      });
+      var j = await r.json();
+      if (!r.ok || !j.ok) throw new Error(j.error||"登录失败");
+      token = j.token||"";
+      try { if (token) localStorage.setItem("doubi_token", token); } catch(e) {}
+      setAuthPill(true, j.username||u);
+      showView("home");
+      await Promise.all([refreshTasks(), refreshCols(), refreshLogs(), refreshSet()]);
+    } catch(e) {
+      document.getElementById("loginHint").textContent = e.message||"登录失败";
+    }
+  };
+  document.getElementById("logoutBtn").onclick = async function(){
+    try { await fetch("/api/auth/logout",{method:"POST",headers:hdrs(),credentials:"same-origin"}); } catch(e) {}
+    token=""; try{localStorage.removeItem("doubi_token")}catch(e){}
+    setAuthPill(false,"未登录");
+    showView("login");
+  };
+
+  loadAll();
+  setInterval(function(){ refreshTasks().catch(function(){}); }, 4000);
+})();
+</script>
+</body>
+</html>

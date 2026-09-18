@@ -189,7 +189,34 @@ func (h *Handlers) Index(c *gin.Context) {
 	} else {
 		staticDir = filepath.Join(staticDir, "static")
 	}
+	// Windows 桌面壳使用专用页；网页/Web 仍走 index-v2
+	if c.Query("ui") == "desktop" || strings.HasPrefix(c.Request.URL.Path, "/desktop") {
+		p := filepath.Join(staticDir, "desktop-win.html")
+		if _, err := os.Stat(p); err == nil {
+			c.File(p)
+			return
+		}
+	}
 	c.File(filepath.Join(staticDir, "index-v2.html"))
+}
+
+// DesktopWin Windows 独立桌面 UI（首页英雄卡 + 下载列表流）
+func (h *Handlers) DesktopWin(c *gin.Context) {
+	exePath, _ := os.Executable()
+	exeDir := filepath.Dir(exePath)
+	staticDir := os.Getenv("STATIC_DIR")
+	if staticDir == "" {
+		staticDir = filepath.Join(exeDir, "static")
+	} else {
+		staticDir = filepath.Join(staticDir, "static")
+	}
+	p := filepath.Join(staticDir, "desktop-win.html")
+	if _, err := os.Stat(p); err != nil {
+		// 回退到通用控制台
+		h.Index(c)
+		return
+	}
+	c.File(p)
 }
 
 // ==================== Config ====================

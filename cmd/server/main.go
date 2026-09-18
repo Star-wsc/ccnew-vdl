@@ -190,6 +190,7 @@ func main() {
 		}
 		h.Index(c)
 	})
+	r.GET("/desktop", h.DesktopWin)
 	r.GET("/api/config", h.GetConfig)
 	r.POST("/api/browse-folder", h.BrowseFolder)
 	r.POST("/api/download-dir", h.SetDownloadDir)

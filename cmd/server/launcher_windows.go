@@ -210,48 +210,46 @@ using System;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Interop;
 using System.Windows.Media;
 using Microsoft.Web.WebView2.Wpf;
 
 public class WindowCreator {
-    private const double AspectRatio = 1.5;
-
     public static Window Create(string url, string title) {
         var win = new Window();
         win.Title = title;
-        win.Width = 1600;
-        win.Height = 1067;
-        win.MinWidth = 1200;
-        win.MinHeight = 800;
+        win.Width = 1280;
+        win.Height = 820;
+        win.MinWidth = 960;
+        win.MinHeight = 640;
         win.WindowStartupLocation = WindowStartupLocation.CenterScreen;
-        win.Background = new SolidColorBrush(Color.FromRgb(26, 26, 46));
+        win.WindowStyle = WindowStyle.None;
+        win.ResizeMode = ResizeMode.CanResize;
+        win.AllowsTransparency = false;
+        win.Background = new SolidColorBrush(Color.FromRgb(7, 8, 12));
 
         var grid = new Grid();
         var webView = new WebView2();
         grid.Children.Add(webView);
         win.Content = grid;
 
-        bool isResizing = false;
-        win.SizeChanged += (s, e) => {
-            if (isResizing) return;
-            isResizing = true;
-            try {
-                if (e.WidthChanged) {
-                    double h = e.NewSize.Width / AspectRatio;
-                    if (h >= win.MinHeight) win.Height = h;
-                } else {
-                    double w = e.NewSize.Height * AspectRatio;
-                    if (w >= win.MinWidth) win.Width = w;
-                }
-            } catch {}
-            isResizing = false;
-        };
-
         win.Loaded += async (s, e) => {
             try {
                 var env = await Microsoft.Web.WebView2.Core.CoreWebView2Environment.CreateAsync(null, System.IO.Path.Combine(System.IO.Path.GetTempPath(), "ccnew-vdl-wv2"));
                 await webView.EnsureCoreWebView2Async(env);
                 webView.ZoomFactor = 1.0;
+                webView.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
+                webView.CoreWebView2.WebMessageReceived += (sender, args) => {
+                    try {
+                        var msg = args.WebMessageAsJson ?? "";
+                        if (msg.Contains("close")) { win.Close(); return; }
+                        if (msg.Contains("min")) { win.WindowState = WindowState.Minimized; return; }
+                        if (msg.Contains("max")) {
+                            win.WindowState = win.WindowState == WindowState.Maximized
+                                ? WindowState.Normal : WindowState.Maximized;
+                        }
+                    } catch {}
+                };
                 webView.CoreWebView2.Navigate(url);
             } catch (Exception ex) {
                 MessageBox.Show("WebView2 error: " + ex.Message, title, MessageBoxButton.OK, MessageBoxImage.Error);
@@ -279,7 +277,7 @@ Add-Type -TypeDefinition $csCode -ReferencedAssemblies @(
 )
 
 try {
-    $window = [WindowCreator]::Create('http://127.0.0.1:%s/?t=%d', 'CCNEW Video Downloader')
+    $window = [WindowCreator]::Create('http://127.0.0.1:%s/desktop?t=%d', 'DouBi Desktop')
     $app = New-Object System.Windows.Application
     $app.Run($window)
 } catch {
