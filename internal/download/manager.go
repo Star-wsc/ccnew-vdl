@@ -459,14 +459,21 @@ func (m *Manager) GetAllTasks() []*Task {
 	return m.GetAllTasksFiltered("")
 }
 
-// GetAllTasksFiltered 按来源过滤任务，source="" 返回全部（同一账号 Web/APP 数据互通）
+// GetAllTasksFiltered 按来源过滤任务
+// source="" ：Web 端，排除 APP 单视频任务（后端共用、前端独立）
+// source="app"：APP 端，仅 APP 创建的任务
 func (m *Manager) GetAllTasksFiltered(source string) []*Task {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	tasks := make([]*Task, 0, len(m.tasks))
 	for _, task := range m.tasks {
-		if source == "" || task.Source == source {
+		if source == "" {
+			// 无 source 参数（Web）：排除 APP 的单视频任务，合集不受影响
+			if task.Source != "app" {
+				tasks = append(tasks, task)
+			}
+		} else if task.Source == source {
 			tasks = append(tasks, task)
 		}
 	}

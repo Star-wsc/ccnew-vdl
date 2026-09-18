@@ -103,7 +103,7 @@ class ApiService {
     lastUnauthorized = false;
     try {
       final resp = await http
-          .get(Uri.parse('$baseUrl/api/stats'), headers: _authHeaders)
+          .get(Uri.parse('$baseUrl/api/stats?source=app'), headers: _authHeaders)
           .timeout(const Duration(seconds: 5));
       if (resp.statusCode == 401) {
         lastUnauthorized = true;
@@ -126,7 +126,7 @@ class ApiService {
     lastUnauthorized = false;
     try {
       final resp = await http
-          .get(Uri.parse('$baseUrl/api/tasks'), headers: _authHeaders)
+          .get(Uri.parse('$baseUrl/api/tasks?source=app'), headers: _authHeaders)
           .timeout(const Duration(seconds: 5));
       if (resp.statusCode == 401) {
         lastUnauthorized = true;
@@ -143,7 +143,7 @@ class ApiService {
     lastUnauthorized = false;
     try {
       final resp = await http
-          .get(Uri.parse('$baseUrl/api/collections'), headers: _authHeaders)
+          .get(Uri.parse('$baseUrl/api/collections?source=app'), headers: _authHeaders)
           .timeout(const Duration(seconds: 5));
       if (resp.statusCode == 401) {
         lastUnauthorized = true;
