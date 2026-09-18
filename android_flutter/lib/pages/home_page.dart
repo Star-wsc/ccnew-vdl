@@ -152,6 +152,29 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   /// force=true: 用户操作/下载跟踪触发，绕过CD
   /// force=false: 切菜单/兜底触发，1分钟内不重复请求
+  /// 由当前 _tasks 乐观重算顶部统计，避免删完任务数字还卡在旧值
+  void _recomputeStatsFromTasks() {
+    var total = 0, downloading = 0, completed = 0, failed = 0;
+    for (final t in _tasks) {
+      if (t is! Map) continue;
+      total++;
+      final st = (t['status'] ?? '').toString();
+      if (st == 'downloading' || st == 'parsing') downloading++;
+      else if (st == 'completed') completed++;
+      else if (st == 'failed') failed++;
+    }
+    _stats = <String, dynamic>{
+      'total': total,
+      'downloading': downloading,
+      'completed': completed,
+      'failed': failed,
+      'global_speed': _stats['global_speed'] ?? 0,
+    };
+  }
+
+  String _statsSig(Map s) =>
+      '${s['total']}|${s['downloading']}|${s['completed']}|${s['failed']}|${s['global_speed']}';
+
   Future<void> _refresh({bool force = false}) async {
     if (!_foreground || !mounted) return;
     final cdBlocked = !force && DateTime.now().difference(_lastRefresh) < _refreshCD;
@@ -181,17 +204,16 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             ApiService.getCollections(),
           ]);
           if (!mounted) return;
-          // 数据未变则不触发整页 rebuild（2s 轮询时避免无意义掉帧）
-          final same = _stats.length == (results[0] as Map).length &&
+          // 必须比较统计「数值」而不是字段个数，否则删除后 same=true 会卡住旧数字
+          final same = _statsSig(_stats) == _statsSig(results[0] as Map) &&
               _tasks.length == (results[1] as List).length &&
-              _collections.length == (results[2] as List).length &&
               _listSig(_tasks) == _listSig(results[1] as List) &&
               _connected;
           if (!same) {
             setState(() {
-              _stats = results[0] as Map<String, dynamic>;
-              _tasks = results[1] as List<dynamic>;
-              _collections = results[2] as List<dynamic>;
+              _stats = Map<String, dynamic>.from(results[0] as Map);
+              _tasks = List<dynamic>.from(results[1] as List);
+              _collections = List<dynamic>.from(results[2] as List);
               _connected = true;
             });
           } else if (!_connected) {
@@ -417,8 +439,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       await ApiService.deleteTask(id, deleteFile: deleteFile);
       // 不管服务器是否成功，都从本地列表移除（乐观删除）
       if (mounted) {
-        setState(() => _tasks.removeWhere((t) => t['id'] == id));
+        setState(() {
+          _tasks.removeWhere((t) => t['id'] == id);
+          _recomputeStatsFromTasks();
+        });
         LocalStore.saveTasks(_tasks);
+        LocalStore.saveStats(_stats);
+        await _refresh(force: true);
       }
     }
   }
@@ -446,12 +473,17 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       for (final id in _selected.toList()) {
         await ApiService.deleteTask(id, deleteFile: true);
       }
+      if (!mounted) return;
       setState(() {
         _tasks.removeWhere((t) => _selected.contains(t['id']));
         _selected.clear();
         _multiSelect = false;
+        _recomputeStatsFromTasks();
       });
       LocalStore.saveTasks(_tasks);
+      LocalStore.saveStats(_stats);
+      // 强制与服务器对账，避免顶部统计停在删之前
+      await _refresh(force: true);
     }
   }
 
