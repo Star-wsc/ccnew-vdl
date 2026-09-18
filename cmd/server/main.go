@@ -22,7 +22,7 @@ import (
 )
 
 // Version is set at build time via ldflags
-var Version = "1.5.0"
+var Version = "2.0.0"
 
 // killPortProcess 仅强杀同名的自身旧实例，避免误伤占用端口的其他程序。
 func killPortProcess(port string) {

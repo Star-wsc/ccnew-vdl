@@ -41,6 +41,25 @@ logs/
 config.json
 HANDOVER.md
 startup.log
+AUTH_PLAN.md
+SECURITY_AUDIT.md
+RELEASE-2.0.md
+WINTEST-README.md
+
+# 内部开发文档（不进公开仓）
+CLAUDE.md
+DEVELOPMENT.md
+FIXLOG.md
+internal/docs/
+
+# 运行时/密钥
+auth.json
+devices.json
+*.pem
+*.key
+server-linux-amd64
+server-*.exe
+*-auth
 
 # 本地运行时生成的文件
 downloads/
