@@ -17,13 +17,18 @@ void main() async {
     systemNavigationBarColor: Colors.transparent,
   ));
 
-  await LiquidGlassWidgets.initialize();
+  await LiquidGlassWidgets.initialize(
+    // 预热 shader 到内存；列表卡片业务侧已用 minimal，滚动期几乎不跑自定义 shader
+    enablePerformanceMonitor: false,
+  );
   await ApiService.init();
 
   runApp(
     ChangeNotifierProvider(
       create: (_) => ThemeProvider(),
-      child: LiquidGlassWidgets.wrap(child: const DouBiApp()),
+      child: LiquidGlassWidgets.wrap(
+        child: const DouBiApp(),
+      ),
     ),
   );
 }
@@ -52,9 +57,19 @@ class DouBiApp extends StatelessWidget {
       return (route: _StartRoute.home, needSetup: false);
     }
     final hasToken =
-        ApiService.authToken != null && ApiService.authToken!.isNotEmpty;
-    if (auth['logged_in'] == true || hasToken) {
+        ApiService.authToken != null && ApiService.authToken!.isEmpty == false;
+    // 有本地 token 但服务器会话已丢（重启等）→ 必须回登录，不能进主页
+    if (auth['logged_in'] == true) {
       return (route: _StartRoute.home, needSetup: false);
+    }
+    if (hasToken) {
+      // 用一次业务请求验证 token 是否仍有效
+      try {
+        await ApiService.getTasks();
+        return (route: _StartRoute.home, needSetup: false);
+      } catch (_) {
+        await ApiService.setToken(null);
+      }
     }
     if (auth['need_setup'] == true) {
       return (route: _StartRoute.needSetup, needSetup: true);

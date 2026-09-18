@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'login_page.dart';
 import '../services/api_service.dart';
 import '../services/native_bridge.dart';
 import '../services/theme_provider.dart';
@@ -103,8 +104,12 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Future<void> _logout() async {
     await ApiService.logout();
-    if (mounted) _showToast('已退出登录');
-    await _checkServer();
+    if (!mounted) return;
+    // 必须回到登录页，不能停在设置/主页
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const LoginPage()),
+      (route) => false,
+    );
   }
 
   /// 加载服务器当前的YouTube代理设置

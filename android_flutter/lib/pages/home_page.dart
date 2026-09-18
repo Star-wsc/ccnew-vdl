@@ -11,6 +11,7 @@ import '../services/theme_provider.dart';
 import '../widgets/preview_dialog.dart';
 import 'settings_page.dart';
 import 'player_page.dart';
+import 'login_page.dart';
 
 // 主题感知的颜色扩展
 extension ThemeColors on BuildContext {
@@ -137,6 +138,18 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   /// 拉取服务器数据。
+  /// 任务列表轻量签名：id+status+progress，用于跳过无变化 rebuild
+  String _listSig(List list) {
+    final b = StringBuffer();
+    for (final t in list) {
+      if (t is! Map) continue;
+      b.write(t['id']); b.write('|');
+      b.write(t['status']); b.write('|');
+      b.write(t['progress']); b.write(';');
+    }
+    return b.toString();
+  }
+
   /// force=true: 用户操作/下载跟踪触发，绕过CD
   /// force=false: 切菜单/兜底触发，1分钟内不重复请求
   Future<void> _refresh({bool force = false}) async {
@@ -157,7 +170,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             auth['logged_in'] != true &&
             (ApiService.authToken == null || ApiService.authToken!.isEmpty);
         if (needLogin) {
-          if (mounted) setState(() => _connected = true);
+          // 服务器开着鉴权且本地无有效登录 → 强制登录页（会话重启失效也会走到这）
+          _gotoLoginOnce();
+          return;
         } else {
         try {
           final results = await Future.wait([
@@ -166,20 +181,31 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             ApiService.getCollections(),
           ]);
           if (!mounted) return;
-          setState(() {
-            _stats = results[0] as Map<String, dynamic>;
-            _tasks = results[1] as List<dynamic>;
-            _collections = results[2] as List<dynamic>;
-            _connected = true;
-          });
+          // 数据未变则不触发整页 rebuild（2s 轮询时避免无意义掉帧）
+          final same = _stats.length == (results[0] as Map).length &&
+              _tasks.length == (results[1] as List).length &&
+              _collections.length == (results[2] as List).length &&
+              _listSig(_tasks) == _listSig(results[1] as List) &&
+              _connected;
+          if (!same) {
+            setState(() {
+              _stats = results[0] as Map<String, dynamic>;
+              _tasks = results[1] as List<dynamic>;
+              _collections = results[2] as List<dynamic>;
+              _connected = true;
+            });
+          } else if (!_connected) {
+            setState(() => _connected = true);
+          }
           // 新数据回写本地缓存（内容变化才写盘）
           LocalStore.saveTasks(_tasks);
           LocalStore.saveCollections(_collections);
           LocalStore.saveStats(_stats);
         } catch (_) {
-          // 401 未登录：服务器在线但未授权，保持本地缓存，绝不用空数据覆盖
+          // 401：会话已失效（如服务器重启）→ 清 token 回登录页，禁止用空数据覆盖缓存
           if (ApiService.lastUnauthorized) {
-            if (mounted) setState(() => _connected = true);
+            _gotoLoginOnce();
+            return;
           } else if (mounted) {
             setState(() => _connected = false);
           }
@@ -248,6 +274,19 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     _refresh(force: true);
   }
 
+  DateTime _lastDlUi = DateTime.fromMillisecondsSinceEpoch(0);
+  bool _wentLogin = false;
+
+  void _gotoLoginOnce() {
+    if (_wentLogin || !mounted) return;
+    _wentLogin = true;
+    ApiService.setToken(null);
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const LoginPage()),
+      (route) => false,
+    );
+  }
+
   Future<void> _downloadToGallery(dynamic task) async {
     final id = task['id'];
     final title = (task['title'] ?? 'video').toString();
@@ -255,7 +294,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     final fileName = '${task['platform'] ?? 'v'}_$safe.mp4';
     setState(() { _dlProgress[id] = 0; _dlSpeed[id] = 0; });
     final localPath = await DownloadManager().downloadToLocal(id, fileName,
-      onProgress: (p, s) { if (mounted) setState(() { _dlProgress[id] = p; _dlSpeed[id] = s; }); });
+      onProgress: (p, s) {
+        if (!mounted) return;
+        final now = DateTime.now();
+        if (now.difference(_lastDlUi).inMilliseconds < 200) return; // 降频，防每包 setState
+        _lastDlUi = now;
+        setState(() { _dlProgress[id] = p; _dlSpeed[id] = s; });
+      });
     if (localPath == null) { if (mounted) setState(() { _dlProgress.remove(id); _dlSpeed.remove(id); }); return; }
     final contentUri = await NativeBridge.saveToGallery(localPath);
     if (contentUri != null) {
@@ -595,15 +640,17 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             itemCount: _tasks.length,
             itemBuilder: (ctx, i) {
               final t = _tasks[i];
-              return GestureDetector(
-                onTap: _multiSelect ? () {
-                  setState(() {
-                    final id = t['id'] as String;
-                    if (_selected.contains(id)) _selected.remove(id);
-                    else _selected.add(id);
-                  });
-                } : null,
-                child: _taskCardGrid(t),
+              return RepaintBoundary(
+                child: GestureDetector(
+                  onTap: _multiSelect ? () {
+                    setState(() {
+                      final id = t['id'] as String;
+                      if (_selected.contains(id)) _selected.remove(id);
+                      else _selected.add(id);
+                    });
+                  } : null,
+                  child: _taskCardGrid(t),
+                ),
               );
             },
           ),
@@ -655,6 +702,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             child: Stack(children: [
               cover.isNotEmpty
                 ? Image.network(ApiService.coverSrc(cover), width: 72, height: 72, fit: BoxFit.cover,
+                    cacheWidth: 144, cacheHeight: 144,
+                    filterQuality: FilterQuality.low,
                     errorBuilder: (_, __, ___) => _coverPlaceholder(platform))
                 : _coverPlaceholder(platform),
               if (platform.isNotEmpty)
@@ -783,6 +832,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             child: Stack(children: [
               if (cover.isNotEmpty)
                 Image.network(ApiService.coverSrc(cover), width: double.infinity, height: double.infinity, fit: BoxFit.cover,
+                  cacheWidth: 360,
+                  filterQuality: FilterQuality.low,
                   errorBuilder: (_, __, ___) => Container(color: const Color(0x0DFFFFFF)))
               else
                 Container(color: const Color(0x0DFFFFFF), child: Center(child: Icon(Icons.video_file, color: text3, size: 32))),
