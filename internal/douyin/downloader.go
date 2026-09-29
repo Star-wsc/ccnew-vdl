@@ -33,11 +33,13 @@ func (d *DouyinDownloader) SetCookies(cookies string) {
 // Parse 解析抖音视频，使用多种策略
 func (d *DouyinDownloader) Parse(rawURL string) (*models.VideoInfo, error) {
 	videoURL := rawURL
+	shareFullURL := rawURL
 
 	// 解析短链接 — 仅 v.douyin.com 官方域名
 	if safeurl.IsDouyinShortLink(videoURL) {
 		resolved, err := d.parser.resolveShortURL(videoURL)
 		if err == nil && resolved != "" {
+			shareFullURL = resolved
 			videoURL = resolved
 			log.Printf("[抖音] 短链接解析为: %s", videoURL)
 		}
@@ -50,7 +52,19 @@ func (d *DouyinDownloader) Parse(rawURL string) (*models.VideoInfo, error) {
 	}
 	log.Printf("[抖音] 视频ID: %s", videoID)
 
-	// 策略1: 用iesdouyin.com分享页 + 移动端UA（最有效！douyin.com返回SPA空壳）
+	// 策略0: 短链完整落地 URL（含 share_sign 等参数）+ Cookie，优先
+	if shareFullURL != rawURL || safeurl.IsDouyinShortLink(rawURL) {
+		log.Printf("[抖音] 策略0: 完整分享落地页")
+		info, err := d.parseWithMobileUA(shareFullURL)
+		if err == nil && info.VideoURL != "" {
+			d.enrichAudioURL(info, videoID)
+			log.Printf("[抖音] 策略0成功: %s", info.Title)
+			return info, nil
+		}
+		log.Printf("[抖音] 策略0失败: %v", err)
+	}
+
+	// 策略1: 用iesdouyin.com分享页 + 移动端UA
 	shareURL := fmt.Sprintf("https://www.iesdouyin.com/share/video/%s/", videoID)
 	log.Printf("[抖音] 策略1: iesdouyin分享页+移动端UA: %s", shareURL)
 	info, err := d.parseWithMobileUA(shareURL)
@@ -92,15 +106,25 @@ func (d *DouyinDownloader) Parse(rawURL string) (*models.VideoInfo, error) {
 	}
 	log.Printf("[抖音] 策略4失败: %v", err)
 
-	// 策略5: 第三方API
-	log.Printf("[抖音] 策略5: 第三方API")
-	info, err = d.parseViaAPI(douyinURL)
+	// 策略5: iteminfo 等备用 API
+	log.Printf("[抖音] 策略5: iteminfo API")
+	info, err = d.parser.parseItemInfoAPI(videoID)
 	if err == nil && info.VideoURL != "" {
 		d.enrichAudioURL(info, videoID)
 		log.Printf("[抖音] 策略5成功")
 		return info, nil
 	}
 	log.Printf("[抖音] 策略5失败: %v", err)
+
+	// 策略6: 第三方API（可能不可用）
+	log.Printf("[抖音] 策略6: 第三方API")
+	info, err = d.parseViaAPI(douyinURL)
+	if err == nil && info.VideoURL != "" {
+		d.enrichAudioURL(info, videoID)
+		log.Printf("[抖音] 策略6成功")
+		return info, nil
+	}
+	log.Printf("[抖音] 策略6失败: %v", err)
 
 	return nil, fmt.Errorf("all parse strategies failed for: %s", rawURL)
 }
@@ -148,6 +172,11 @@ func (d *DouyinDownloader) parseWithUA(videoURL, userAgent string) (*models.Vide
 	req.Header.Set("User-Agent", userAgent)
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
 	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9")
+	req.Header.Set("Referer", "https://www.douyin.com/")
+	// 带上用户 Cookie（分享页/落地页有 cookie 时更易出 play_addr）
+	if d.parser.cookies != "" {
+		req.Header.Set("Cookie", d.parser.cookies)
+	}
 
 	resp, err := client.Do(req)
 	if err != nil {

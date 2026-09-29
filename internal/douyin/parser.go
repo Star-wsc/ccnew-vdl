@@ -540,6 +540,75 @@ func mapQualityAdvanced(gearName string, qualityType float64, width, height int)
 }
 
 
+// parseItemInfoAPI 旧版 iteminfo / share item 接口（多数环境失效，保留作后备）
+func (p *Parser) parseItemInfoAPI(videoID string) (*models.VideoInfo, error) {
+	if videoID == "" {
+		return nil, fmt.Errorf("videoID is empty")
+	}
+	urls := []string{
+		fmt.Sprintf("https://www.iesdouyin.com/web/api/v2/aweme/iteminfo/?item_ids=%s", videoID),
+		fmt.Sprintf("https://www.iesdouyin.com/aweme/v1/web/aweme/detail/?aweme_id=%s&aid=1128&version_code=280000&device_platform=android", videoID),
+	}
+	cookieStr := p.cookies
+	if cookieStr == "" {
+		if ttwid := p.getTtwid(); ttwid != "" {
+			cookieStr = "ttwid=" + ttwid
+		}
+	}
+	for _, u := range urls {
+		req, err := http.NewRequest("GET", u, nil)
+		if err != nil {
+			continue
+		}
+		req.Header.Set("User-Agent", douyinAppUA)
+		req.Header.Set("Accept", "application/json")
+		req.Header.Set("Referer", "https://www.iesdouyin.com/")
+		if cookieStr != "" {
+			req.Header.Set("Cookie", cookieStr)
+		}
+		resp, err := p.client.Do(req)
+		if err != nil {
+			continue
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != 200 || len(body) == 0 {
+			continue
+		}
+		s := string(body)
+		if u2 := extractFirstURLFromJSON(s); u2 != "" {
+			info := &models.VideoInfo{VideoURL: processVideoURL(decodeUnicodeURL(u2))}
+			if title := extractJSONString(s, "desc"); title != "" {
+				info.Title = title
+			}
+			if info.VideoURL != "" {
+				return info, nil
+			}
+		}
+	}
+	return nil, fmt.Errorf("iteminfo api no video url")
+}
+
+func extractFirstURLFromJSON(s string) string {
+	re := regexp.MustCompile(`https?://[^"\\]+(?:douyinvod|bytecdn|amemv)[^"\\]*`)
+	if m := re.FindString(s); m != "" {
+		return m
+	}
+	re2 := regexp.MustCompile(`"url"\s*:\s*"(https?://[^"]+)"`)
+	if m := re2.FindStringSubmatch(s); len(m) > 1 {
+		return m[1]
+	}
+	return ""
+}
+
+func extractJSONString(s, key string) string {
+	re := regexp.MustCompile(`"` + key + `"\s*:\s*"([^"]*)"`)
+	if m := re.FindStringSubmatch(s); len(m) > 1 {
+		return m[1]
+	}
+	return ""
+}
+
 // getTtwid 从字节跳动获取ttwid cookie（Detail API必需）
 func (p *Parser) getTtwid() string {
 	body := `{"region":"cn","aid":1768,"needFid":false,"service":"www.ixigua.com","migrate_priority":0,"cbUrlProtocol":"https","union":true}`
@@ -582,12 +651,16 @@ func (p *Parser) parseDetailAPI(videoID string) (*models.VideoInfo, error) {
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9")
 
-	// 添加Cookie支持（优先使用用户Cookie，否则自动获取ttwid）
+	// Cookie：用户 Cookie 优先，并尽量补上 ttwid
 	cookieStr := p.cookies
-	if cookieStr == "" {
+	if cookieStr == "" || !strings.Contains(cookieStr, "ttwid=") {
 		ttwid := p.getTtwid()
 		if ttwid != "" {
-			cookieStr = "ttwid=" + ttwid
+			if cookieStr == "" {
+				cookieStr = "ttwid=" + ttwid
+			} else {
+				cookieStr = cookieStr + "; ttwid=" + ttwid
+			}
 		}
 	}
 	if cookieStr != "" {
