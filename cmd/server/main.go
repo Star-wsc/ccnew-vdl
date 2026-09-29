@@ -22,9 +22,9 @@ import (
 )
 
 // Version is set at build time via ldflags
-var Version = "2.0.0"
+var Version = "2.0.1"
 
-// killPortProcess 仅强杀同名的自身旧实例，避免误伤占用端口的其他程序。
+// killPortProcess 仅强杀同名的自身旧实例，避免误伤占用端口的其他程序�?
 func killPortProcess(port string) {
 	if runtime.GOOS != "windows" {
 		return
@@ -60,16 +60,16 @@ func killPortProcess(port string) {
 		}
 		name := strings.Trim(strings.ToLower(cols[0]), "\"")
 		if selfName == "" || !strings.EqualFold(name, selfName) {
-			log.Printf("端口 %s 被 %s(PID=%s) 占用且非本程序实例，跳过强杀", port, name, pid)
+			log.Printf("端口 %s �?%s(PID=%s) 占用且非本程序实例，跳过强杀", port, name, pid)
 			continue
 		}
-		log.Printf("杀掉占用端口%s的旧实例: PID=%s", port, pid)
+		log.Printf("杀掉占用端�?s的旧实例: PID=%s", port, pid)
 		exec.Command("taskkill", "/F", "/PID", pid).Run()
 	}
 }
 
-// getStaticDir 返回静态文件目录。优先使用 STATIC_DIR 环境变量（Android 场景下
-// exeDir 是只读的 nativeLibraryDir，静态文件需放在 app 私有目录）。
+// getStaticDir 返回静态文件目录。优先使�?STATIC_DIR 环境变量（Android 场景�?
+// exeDir 是只读的 nativeLibraryDir，静态文件需放在 app 私有目录）�?
 func getStaticDir(exeDir string) string {
 	if env := os.Getenv("STATIC_DIR"); env != "" {
 		return filepath.Join(env, "static")
@@ -77,7 +77,7 @@ func getStaticDir(exeDir string) string {
 	return filepath.Join(exeDir, "static")
 }
 
-// cleanupStaleTempFiles 清理上次运行残留的临时分片（崩溃/断电遗留）。
+// cleanupStaleTempFiles 清理上次运行残留的临时分片（崩溃/断电遗留）�?
 func cleanupStaleTempFiles() {
 	patterns := []string{
 		"temp_video_*.m4s",
@@ -95,7 +95,7 @@ func cleanupStaleTempFiles() {
 		}
 	}
 	if removed > 0 {
-		log.Printf("清理了 %d 个上次运行残留的临时文件", removed)
+		log.Printf("清理�?%d 个上次运行残留的临时文件", removed)
 	}
 }
 
@@ -107,7 +107,7 @@ func main() {
 
 	cfg := config.Load()
 
-	// 初始化文件日志
+	// 初始化文件日�?
 	os.MkdirAll(cfg.LogDir, 0755)
 	if logFile, logErr := os.OpenFile(filepath.Join(cfg.LogDir, "server.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); logErr == nil {
 		log.SetOutput(logFile)
@@ -121,20 +121,20 @@ func main() {
 	mgr := download.NewManager(cfg)
 	h := NewHandlers(cfg, mgr)
 
-	// 任务状态事件 → 操作日志（下载开始/完成/失败等）
+	// 任务状态事�?�?操作日志（下载开�?完成/失败等）
 	mgr.OnTaskEvent = h.addLog
 
 	// 恢复持久化的操作日志（重启不丢）
 	h.loadOperationLogs()
 
-	// yt-dlp引擎自动更新: 启动后台检查一次, 之后每24小时静默拉新
-	// (YouTube协议变更频繁, 引擎保持新鲜才能持续可用; 失败仅记日志不影响服务)
+	// yt-dlp引擎自动更新: 启动后台检查一�? 之后�?4小时静默拉新
+	// (YouTube协议变更频繁, 引擎保持新鲜才能持续可用; 失败仅记日志不影响服�?
 	go func() {
 		for {
 			if out, newVer, err := youtube.SelfUpdate(); err != nil {
 				h.addLog("WARN", "", "yt-dlp自动更新跳过: "+err.Error())
 			} else if strings.Contains(out, "Updated") || strings.Contains(out, "updating to") {
-				h.addLog("INFO", "", "YouTube解析引擎已自动更新: "+newVer)
+				h.addLog("INFO", "", "YouTube解析引擎已自动更�? "+newVer)
 			}
 			time.Sleep(24 * time.Hour)
 		}
@@ -148,11 +148,11 @@ func main() {
 	// 启动订阅检查器
 	h.startSubscriptionChecker()
 
-	// 鉴权：显式 AUTH_MODE 优先；桌面默认 off（点开即用），Docker/CLI 默认 on
+	// 鉴权：显�?AUTH_MODE 优先；桌面默�?off（点开即用），Docker/CLI 默认 on
 	authMode := auth.ResolveMode(os.Getenv("AUTH_MODE"), isDesktopMode())
 	gate, authErr := newAuthGate(authConfigDir(), authMode)
 	if authErr != nil {
-		log.Printf("[WARN] 鉴权模块初始化失败，已退回关闭鉴权: %v", authErr)
+		log.Printf("[WARN] 鉴权模块初始化失败，已退回关闭鉴�? %v", authErr)
 		gate, _ = newAuthGate(authConfigDir(), "off")
 	}
 	log.Printf("[启动] 鉴权模式: %s", authMode)
@@ -177,10 +177,10 @@ func main() {
 	r.POST("/api/auth/devices", gate.handleCreateDevice)
 	r.DELETE("/api/auth/devices/:id", gate.handleRevokeDevice)
 
-	// 所有 API 路由
+	// 所�?API 路由
 	r.GET("/", func(c *gin.Context) {
 		c.Header("Cache-Control", "no-store, no-cache, must-revalidate")
-		// 鉴权开启且未登录/未初始化时，先出登录页，避免白屏调 API 401
+		// 鉴权开启且未登�?未初始化时，先出登录页，避免白屏�?API 401
 		if gate.enabled() && !gate.allow(c) {
 			exePath, _ := os.Executable()
 			loginPage := filepath.Join(getStaticDir(filepath.Dir(exePath)), "login.html")
@@ -238,7 +238,7 @@ func main() {
 	r.DELETE("/api/collections/:id/videos/:idx/file", h.DeleteCollectionVideoFile)
 	r.POST("/api/collections/:id/subscribe", h.ToggleCollectionSubscribe)
 
-	// 获取可执行文件所在目录
+	// 获取可执行文件所在目�?
 	exePath, _ := os.Executable()
 	exeDir := filepath.Dir(exePath)
 
@@ -251,14 +251,14 @@ func main() {
 	srv := &http.Server{Addr: addr, Handler: r}
 
 	go func() {
-		log.Printf("服务器启动: http://127.0.0.1%s", addr)
+		log.Printf("服务器启�? http://127.0.0.1%s", addr)
 		log.Printf("下载目录: %s", cfg.DownloadDir)
 		for i := 0; i < 5; i++ {
 			if err := srv.ListenAndServe(); err != nil {
 				if err == http.ErrServerClosed {
 					return
 				}
-				log.Printf("端口绑定失败，%d秒后重试... (%v)", i+1, err)
+				log.Printf("端口绑定失败�?d秒后重试... (%v)", i+1, err)
 				time.Sleep(time.Duration(i+1) * time.Second)
 				killPortProcess(cfg.Port)
 				time.Sleep(500 * time.Millisecond)
@@ -266,7 +266,7 @@ func main() {
 			}
 			return
 		}
-		log.Fatalf("服务器启动失败: 端口 %s 无法绑定", cfg.Port)
+		log.Fatalf("服务器启动失�? 端口 %s 无法绑定", cfg.Port)
 	}()
 
 	// 等待服务器启动后打开桌面窗口
@@ -278,7 +278,7 @@ func main() {
 
 	<-quit
 
-	log.Println("正在关闭服务器...")
+	log.Println("正在关闭服务�?..")
 	killChildProcess() // 清理前端窗口和WebView2
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -286,7 +286,7 @@ func main() {
 	log.Println("服务器已关闭")
 }
 
-// corsMiddleware 仅对本机来源（含端口）放行 CORS，拒绝前缀伪装域名。
+// corsMiddleware 仅对本机来源（含端口）放�?CORS，拒绝前缀伪装域名�?
 func corsMiddleware(port string) gin.HandlerFunc {
 	allowed := map[string]bool{
 		"http://127.0.0.1:" + port: true,
@@ -308,3 +308,4 @@ func corsMiddleware(port string) gin.HandlerFunc {
 		c.Next()
 	}
 }
+
