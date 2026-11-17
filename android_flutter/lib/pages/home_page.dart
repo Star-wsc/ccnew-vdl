@@ -9,6 +9,7 @@ import '../services/local_store.dart';
 import '../services/native_bridge.dart';
 import '../services/theme_provider.dart';
 import '../widgets/preview_dialog.dart';
+import '../widgets/cover_image.dart';
 import 'settings_page.dart';
 import 'player_page.dart';
 import 'login_page.dart';
@@ -734,10 +735,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             borderRadius: BorderRadius.circular(12),
             child: Stack(children: [
               cover.isNotEmpty
-                ? Image.network(ApiService.coverSrc(cover), width: 72, height: 72, fit: BoxFit.cover,
-                    cacheWidth: 144, cacheHeight: 144,
-                    filterQuality: FilterQuality.low,
-                    errorBuilder: (_, __, ___) => _coverPlaceholder(platform))
+                ? CoverImage(
+                    taskId: (task['id'] ?? '').toString(),
+                    coverUrl: cover,
+                    width: 72,
+                    height: 72,
+                    placeholder: _coverPlaceholder(platform),
+                  )
                 : _coverPlaceholder(platform),
               if (platform.isNotEmpty)
                 Positioned(bottom: 4, left: 4, child: _tag(
@@ -864,10 +868,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             borderRadius: BorderRadius.circular(10),
             child: Stack(children: [
               if (cover.isNotEmpty)
-                Image.network(ApiService.coverSrc(cover), width: double.infinity, height: double.infinity, fit: BoxFit.cover,
-                  cacheWidth: 360,
-                  filterQuality: FilterQuality.low,
-                  errorBuilder: (_, __, ___) => Container(color: const Color(0x0DFFFFFF)))
+                CoverImage(
+                  taskId: (task['id'] ?? '').toString(),
+                  coverUrl: cover,
+                  width: double.infinity,
+                  height: double.infinity,
+                  placeholder: Container(color: const Color(0x0DFFFFFF)),
+                )
               else
                 Container(color: const Color(0x0DFFFFFF), child: Center(child: Icon(Icons.video_file, color: text3, size: 32))),
               // 平台角标
