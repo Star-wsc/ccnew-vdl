@@ -1,6 +1,8 @@
 package download
 
 import (
+	"io"
+	"net/http"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -38,6 +40,7 @@ type Task struct {
 	Title        string     `json:"title"`
 	Author       string     `json:"author"`
 	CoverURL     string     `json:"cover_url"`
+	CoverFile    string     `json:"cover_file,omitempty"`
 	VideoURL     string     `json:"video_url,omitempty"`
 	AudioURL     string     `json:"audio_url,omitempty"`
 	Quality      string     `json:"quality"`
@@ -312,6 +315,7 @@ func (m *Manager) ExecuteTask(ctx context.Context, taskID string) {
 	task.Title = videoInfo.Title
 	task.Author = videoInfo.Author
 	task.CoverURL = videoInfo.CoverURL
+	task.CoverFile = m.saveCoverFile(task.ID, videoInfo.CoverURL)
 	task.VideoURL = videoInfo.VideoURL
 	task.Platform = videoInfo.Platform
 	task.Quality = videoInfo.Quality // 使用实际下载的画质
@@ -916,6 +920,49 @@ func sanitizeFilename(name string) string {
 		"\r", "_",
 	)
 	return replacer.Replace(name)
+}
+
+
+// saveCoverFile 将封面缓存到磁盘，失败返回空
+func (m *Manager) saveCoverFile(taskID, coverURL string) string {
+	if coverURL == "" || taskID == "" {
+		return ""
+	}
+	dir := filepath.Join(m.cfg.LogDir, "cover-cache")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return ""
+	}
+	path := filepath.Join(dir, "task-"+sanitizeFilename(taskID)+".img")
+	if st, err := os.Stat(path); err == nil && st.Size() > 0 {
+		return path
+	}
+	client := &http.Client{Timeout: 15 * time.Second}
+	req, err := http.NewRequest("GET", coverURL, nil)
+	if err != nil {
+		return ""
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+	if strings.Contains(coverURL, "hdslb.com") || strings.Contains(coverURL, "bilibili") {
+		req.Header.Set("Referer", "https://www.bilibili.com/")
+	} else {
+		req.Header.Set("Referer", "https://www.douyin.com/")
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return ""
+	}
+	data, err := io.ReadAll(resp.Body)
+	if err != nil || len(data) < 64 {
+		return ""
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return ""
+	}
+	return path
 }
 
 func identifyPlatform(url string) string {

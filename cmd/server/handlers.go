@@ -1082,6 +1082,36 @@ func (h *Handlers) DownloadTaskFile(c *gin.Context) {
 }
 
 // PlayTaskFile Web在线播放（内联输出，无attachment头，支持Range拖动）
+
+// PlayTaskCover 输出任务本地封面缓存
+func (h *Handlers) PlayTaskCover(c *gin.Context) {
+	task := h.mgr.GetTask(c.Param("task_id"))
+	if task == nil {
+		c.JSON(http.StatusNotFound, gin.H{"detail": "任务不存在"})
+		return
+	}
+	p := task.CoverFile
+	if p == "" {
+		p = filepath.Join(h.cfg.LogDir, "cover-cache", "task-"+sanitizeFilename(task.ID)+".img")
+	}
+	data, err := os.ReadFile(p)
+	if err != nil || len(data) == 0 {
+		if task.CoverURL == "" {
+			c.JSON(http.StatusNotFound, gin.H{"detail": "无封面"})
+			return
+		}
+		c.Redirect(http.StatusFound, "/api/proxy/image?url="+url.QueryEscape(task.CoverURL))
+		return
+	}
+	ct := detectImageType(data)
+	if ct == "" {
+		ct = "image/jpeg"
+	}
+	c.Header("Content-Type", ct)
+	c.Header("Cache-Control", "public, max-age=86400")
+	c.Data(http.StatusOK, ct, data)
+}
+
 func (h *Handlers) PlayTaskFile(c *gin.Context) {
 	taskID := c.Param("task_id")
 	task := h.mgr.GetTask(taskID)

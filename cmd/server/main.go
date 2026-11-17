@@ -211,6 +211,7 @@ func main() {
 	r.POST("/api/tasks/:task_id/retry", h.RetryTask)
 	r.GET("/api/tasks/:task_id/download", h.DownloadTaskFile)
 	r.GET("/api/tasks/:task_id/play", h.PlayTaskFile)
+	r.GET("/api/tasks/:task_id/cover", h.PlayTaskCover)
 	r.GET("/api/tasks/:task_id/stream", h.StreamTaskToMobile)
 	r.GET("/api/tasks/:task_id/proxy-download", h.ProxyDownload)
 	r.GET("/api/stats", h.GetStats)
