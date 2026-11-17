@@ -1,11 +1,12 @@
-﻿import 'dart:io';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 
 import '../services/api_service.dart';
 import '../services/cover_cache.dart';
 
-/// 灏侀潰缁勪欢锛氫紭鍏?App 绉佹湁鏈湴缂撳瓨锛屽啀閫€鍥炵綉缁滐紱涓嶅啓绯荤粺鐩稿唽銆?class CoverImage extends StatelessWidget {
+/// 封面：优先 App 私有目录本地缓存，失败再网络；不写系统相册。
+class CoverImage extends StatelessWidget {
   final String taskId;
   final String coverUrl;
   final double? width;
@@ -24,11 +25,7 @@ import '../services/cover_cache.dart';
   @override
   Widget build(BuildContext context) {
     final ph = placeholder ??
-        Container(
-          width: width,
-          height: height,
-          color: const Color(0x0DFFFFFF),
-        );
+        Container(width: width, height: height, color: const Color(0x0DFFFFFF));
     if (taskId.isEmpty && coverUrl.isEmpty) return ph;
     return FutureBuilder<String?>(
       future: CoverCache.localPath(taskId, coverUrl),
@@ -44,7 +41,6 @@ import '../services/cover_cache.dart';
           );
         }
         if (snap.connectionState == ConnectionState.waiting) return ph;
-        // 鏃犳湰鍦扮紦瀛樻椂鍐嶈蛋缃戠粶锛堜粛缁忔湇鍔″櫒浠ｇ悊锛屼笉鍐欑浉鍐岋級
         if (coverUrl.isEmpty) return ph;
         return Image.network(
           ApiService.coverSrc(coverUrl),
@@ -52,7 +48,6 @@ import '../services/cover_cache.dart';
           height: height,
           fit: BoxFit.cover,
           filterQuality: FilterQuality.low,
-          cacheWidth: width != null ? (width! * 2).round() : null,
           errorBuilder: (_, __, ___) => ph,
         );
       },
