@@ -521,6 +521,21 @@ $$(".tab").forEach(b=>b.addEventListener("click",()=>{
 }));
 
 /* ===== 轮询（任务+合集） ===== */
+let LAST_SIG="";
+function taskSig(){
+  return TASKS.map(t=>t.id+"|"+t.status+"|"+t.progress+"|"+(t.cover_url||"")+"|"+(t.title||"")).join("\n")+
+    "\n#"+COLS.map(c=>c.id+"|"+c.status+"|"+(c.cover_url||"")).join("\n");
+}
+function patchProgress(){
+  // 只改进度条，避免整卡重建导致封面闪烁
+  TASKS.forEach(t=>{
+    const a=taskAggregate(t);
+    const bar=document.querySelector('.tcard[data-tid="'+t.id+'"] .pfl');
+    const meta=document.querySelector('.tcard[data-tid="'+t.id+'"] .pm');
+    if(bar) bar.style.width=a.progress+"%";
+    if(meta) meta.innerHTML='<span>'+a.progress+'%</span><span>'+(t.status==="downloading"?fspd(a.speed):"")+'</span>';
+  });
+}
 async function poll(){
   try{
     const s=await api("/api/stats");
@@ -531,7 +546,16 @@ async function poll(){
     TASKS=await api("/api/tasks")||[];
     COLS=await api("/api/collections")||[];
     $("#tsCount").textContent=(TASKS.length+COLS.length)+" 条";
-    renderTasks();renderFeed();
+    const sig=taskSig();
+    if(sig!==LAST_SIG){
+      // 结构变化才重绘；否则只 patch 进度
+      const structOnly=TASKS.map(t=>t.id+"|"+t.status+"|"+(t.cover_url||"")+"|"+(t.title||"")).join("\n");
+      const lastStruct=LAST_SIG.split("\n#")[0].split("\n").map(x=>{const p=x.split("|");return p[0]+"|"+p[1]+"|"+p[3]+"|"+p[4]}).join("\n");
+      if(structOnly!==lastStruct) renderTasks();
+      else patchProgress();
+      LAST_SIG=sig;
+    }
+    renderFeed();
   }catch(e){}
 }
 
@@ -607,7 +631,8 @@ function collectionAggregate(c){
 
 /* ===== 卡片渲染辅助 ===== */
 function taskCover(cover,platform){
-  return'<div class="tcov">'+(cover?'<img src="'+pimg(cover)+'" alt="" loading="lazy">':'<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:var(--faint);font-size:11px">暂无封面</div>')+plat(platform)+'</div>';
+  if(!cover) return '<div class="tcov"><div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:var(--faint);font-size:11px">暂无封面</div>'+plat(platform)+'</div>';
+  return'<div class="tcov"><img src="'+pimg(cover)+'" alt="" loading="lazy" onerror="this.remove();this.parentNode.insertAdjacentHTML(\'afterbegin\',\'<div style=&quot;width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:var(--faint);font-size:11px&quot;>暂无封面</div>\')">'+plat(platform)+'</div>';
 }
 function taskActionsRetry(id){return'<button class="ibtn" title="重试" onclick="retry(\''+id+'\')"><svg class="ic" viewBox="0 0 24 24"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"/><path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14"/></svg></button>'}
 function taskActionsPlay(id){return'<button class="ibtn" title="在线播放" onclick="event.stopPropagation();playT(\''+id+'\')"><svg class="ic" viewBox="0 0 24 24"><polygon points="6 3 21 12 6 21"/></svg></button>'}

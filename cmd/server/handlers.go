@@ -626,6 +626,22 @@ func (h *Handlers) ProxyImage(c *gin.Context) {
 		return
 	}
 
+	// 磁盘缓存：抖音/B站封面 URL 带过期签名，过期后再取会失败，
+	// 用首次成功的图兜底，避免旧任务封面「消失」
+	cacheDir := filepath.Join(h.cfg.LogDir, "cover-cache")
+	_ = os.MkdirAll(cacheDir, 0o755)
+	sum := sha256.Sum256([]byte(imageURL))
+	cachePath := filepath.Join(cacheDir, hex.EncodeToString(sum[:])+".img")
+	if data, err := os.ReadFile(cachePath); err == nil && len(data) > 0 {
+		if ct := detectImageType(data); ct != "" {
+			c.Header("Content-Type", ct)
+			c.Header("Cache-Control", "public, max-age=86400")
+			c.Header("X-Cover-Cache", "hit")
+			c.Writer.Write(data)
+			return
+		}
+	}
+
 	client := newProxiedClientFor(15*time.Second, h.ytOutboundProxy(imageURL))
 	req, err := http.NewRequest("GET", imageURL, nil)
 	if err != nil {
@@ -655,13 +671,44 @@ func (h *Handlers) ProxyImage(c *gin.Context) {
 		return
 	}
 
+	data, err := io.ReadAll(resp.Body)
+	if err != nil || len(data) == 0 {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "读取图片失败"})
+		return
+	}
+
 	contentType := resp.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = detectImageType(data)
+	}
 	if contentType == "" {
 		contentType = "image/jpeg"
 	}
+	// 写缓存（失败不影响响应）
+	_ = os.WriteFile(cachePath, data, 0o644)
 	c.Header("Content-Type", contentType)
 	c.Header("Cache-Control", "public, max-age=86400")
-	io.Copy(c.Writer, resp.Body)
+	c.Header("X-Cover-Cache", "miss")
+	c.Writer.Write(data)
+}
+
+func detectImageType(data []byte) string {
+	if len(data) < 12 {
+		return ""
+	}
+	if data[0] == 0xFF && data[1] == 0xD8 {
+		return "image/jpeg"
+	}
+	if data[0] == 0x89 && data[1] == 0x50 && data[2] == 0x4E && data[3] == 0x47 {
+		return "image/png"
+	}
+	if data[0] == 'G' && data[1] == 'I' && data[2] == 'F' {
+		return "image/gif"
+	}
+	if data[0] == 'R' && data[1] == 'I' && data[2] == 'F' && data[3] == 'F' && data[8] == 'W' && data[9] == 'E' && data[10] == 'B' && data[11] == 'P' {
+		return "image/webp"
+	}
+	return ""
 }
 
 func (h *Handlers) ProxyFileDownload(c *gin.Context) {
